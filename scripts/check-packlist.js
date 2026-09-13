@@ -33,6 +33,7 @@ const allowedPrefixes = [
   'README.md',
   'README-CN.md',
   'LICENSE',
+  'readme-banner.svg',
 ];
 
 const forbidden = [

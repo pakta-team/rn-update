@@ -31,7 +31,7 @@
     "readme-banner.svg"
   ],
   "scripts": {
-    "prepublishOnly": "NODE_ENV=production bun scripts/prepublish.ts",
+    "prepublishOnly": "bun scripts/prepublish.ts",
     "publish:local": "SKIP_NATIVE_BUILD=1 npm publish",
     "prepack": "bun submodule && bun lint",
     "lint": "biome check src && tsc --noEmit && node scripts/check-harmony-types.js && node scripts/check-native-spec-parity.js",

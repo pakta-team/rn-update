@@ -1,0 +1,16 @@
+/**
+ * [INPUT]: 依赖 HarmonyOS AppScope 构建约定与应用资源标识
+ * [OUTPUT]: 提供应用 bundleName、版本、图标和本地化名称元数据
+ * [POS]: harmony_use_pakta 顶层应用清单，供 Hvigor 生成可安装应用包
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+{
+  "app": {
+    "bundleName": "com.charmlot.testpakta",
+    "vendor": "example",
+    "versionCode": 1000000,
+    "versionName": "1.0.0",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name"
+  }
+}

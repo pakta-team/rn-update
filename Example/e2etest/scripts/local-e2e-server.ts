@@ -1,0 +1,254 @@
+#!/usr/bin/env bun
+/*
+ * [INPUT]: 依赖 Bun HTTP、文件系统、localUpdateConfig 与本地制品目录
+ * [OUTPUT]: 对外提供版本检查、制品下载、控制和状态 HTTP 接口
+ * [POS]: e2etest 更新链的本地传输边界，模拟服务端而不接入生产服务
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  LOCAL_UPDATE_APP_KEYS,
+  LOCAL_UPDATE_FILES,
+  LOCAL_UPDATE_HASHES,
+  LOCAL_UPDATE_PORT,
+} from '../e2e/localUpdateConfig.ts';
+
+declare const Bun: typeof import('bun');
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const artifactsRoot = path.resolve(moduleDir, '../.e2e-artifacts');
+const port = Number(process.env.E2E_ASSET_PORT || LOCAL_UPDATE_PORT);
+const appKeyToPlatform = Object.fromEntries(
+  Object.entries(LOCAL_UPDATE_APP_KEYS).map(([platform, appKey]) => [
+    appKey,
+    platform,
+  ])
+);
+
+// Flipped by the /control/force-boot endpoint. When on, every update response
+// carries config.forceBoot so the client's native cold-start check activates
+// the version it downloads — the brick-rescue path, which by definition has to
+// work without any JS check. Off by default so the other suites keep full
+// control over when a version becomes active.
+let forceBootEnabled = false;
+
+const contentTypes: Record<string, string> = {
+  '.json': 'application/json; charset=utf-8',
+  '.ppk': 'application/octet-stream',
+  '.patch': 'application/octet-stream',
+  '.apk': 'application/vnd.android.package-archive',
+};
+
+function usesFullFallback(platform: string) {
+  const manifestPath = path.join(artifactsRoot, platform, 'manifest.json');
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
+      fullFallback?: unknown;
+    };
+    return manifest.fullFallback === true;
+  } catch {
+    return false;
+  }
+}
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
+function safeResolve(urlPath: string) {
+  const relativePath = urlPath.replace(/^\/artifacts/, '');
+  const normalized = path
+    .normalize(decodeURIComponent(relativePath))
+    .replace(/^(\.\.(\/|\\|$))+/, '');
+  const target = path.resolve(artifactsRoot, `.${normalized}`);
+  if (!target.startsWith(artifactsRoot)) {
+    return null;
+  }
+  return target;
+}
+
+function buildUpdateResponse(
+  platform: string,
+  currentHash: string,
+  diffV: number,
+  origin: string
+) {
+  const assetBasePath = `${origin}/artifacts/${platform}`;
+  const fullFallback = usesFullFallback(platform);
+
+  if (!currentHash) {
+    return {
+      update: true,
+      name: 'local-full-v1',
+      hash: LOCAL_UPDATE_HASHES.full,
+      description: 'Serve a full package from local e2e server.',
+      metaInfo: JSON.stringify({ stage: 'full', platform }),
+      paths: [assetBasePath],
+      full: LOCAL_UPDATE_FILES.full,
+    };
+  }
+
+  if (currentHash === LOCAL_UPDATE_HASHES.full) {
+    return {
+      update: true,
+      name: 'local-diff-v2',
+      hash: LOCAL_UPDATE_HASHES.ppkPatch,
+      description: 'Serve a ppk diff package from local e2e server.',
+      metaInfo: JSON.stringify({ stage: 'diff', platform }),
+      paths: [assetBasePath],
+      diff: LOCAL_UPDATE_FILES.ppkDiff,
+      ...(fullFallback ? { full: LOCAL_UPDATE_FILES.ppkFull } : {}),
+    };
+  }
+
+  if (platform === 'android' && currentHash === LOCAL_UPDATE_HASHES.ppkPatch) {
+    return {
+      update: true,
+      name: 'local-pdiff-v3',
+      hash: LOCAL_UPDATE_HASHES.packagePatch,
+      description: 'Serve an Android package diff from local e2e server.',
+      metaInfo: JSON.stringify({ stage: 'pdiff', platform }),
+      paths: [assetBasePath],
+      pdiff: LOCAL_UPDATE_FILES.packageDiff,
+      ...(fullFallback ? { full: LOCAL_UPDATE_FILES.packageFull } : {}),
+    };
+  }
+
+  const v2TrackDiffPath = path.join(
+    artifactsRoot,
+    platform,
+    LOCAL_UPDATE_FILES.v2TrackDiff
+  );
+  const v2TrackPrevHash =
+    platform === 'android'
+      ? LOCAL_UPDATE_HASHES.packagePatch
+      : LOCAL_UPDATE_HASHES.ppkPatch;
+  if (currentHash === v2TrackPrevHash && diffV >= 2) {
+    if (fullFallback) {
+      return {
+        update: true,
+        name: 'local-v2track-v4',
+        hash: LOCAL_UPDATE_HASHES.v2Track,
+        description:
+          'Serve a full v2-track package from local e2e server fallback artifacts.',
+        metaInfo: JSON.stringify({ stage: 'v2track', platform }),
+        paths: [assetBasePath],
+        full: LOCAL_UPDATE_FILES.v2TrackFull,
+      };
+    }
+
+    if (
+      fs.existsSync(v2TrackDiffPath) &&
+      fs.statSync(v2TrackDiffPath).isFile()
+    ) {
+      return {
+        update: true,
+        name: 'local-v2track-v4',
+        hash: LOCAL_UPDATE_HASHES.v2Track,
+        description:
+          'Serve a v2-track HDIFF13 + hbcTransform ppk diff from local e2e server.',
+        metaInfo: JSON.stringify({ stage: 'v2track', platform }),
+        paths: [assetBasePath],
+        diff: LOCAL_UPDATE_FILES.v2TrackDiff,
+      };
+    }
+  }
+
+  return {
+    upToDate: true,
+  };
+}
+
+const server = Bun.serve({
+  port,
+  hostname: '0.0.0.0',
+  async fetch(request: Request) {
+    const url = new URL(request.url);
+
+    if (url.pathname === '/health') {
+      return new Response('ok', {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
+    if (url.pathname === '/control/force-boot') {
+      if (request.method !== 'POST') {
+        return new Response('method not allowed', { status: 405 });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        enabled?: unknown;
+      };
+      forceBootEnabled = body.enabled === true;
+      return json({ forceBoot: forceBootEnabled });
+    }
+
+    if (url.pathname.startsWith('/checkUpdate/')) {
+      if (request.method !== 'POST') {
+        return new Response('method not allowed', { status: 405 });
+      }
+
+      const appKey = url.pathname.split('/').pop();
+      const platform = appKey ? appKeyToPlatform[appKey] : null;
+      if (!platform) {
+        return json({ message: 'unknown appKey' }, 404);
+      }
+
+      const payload = (await request.json().catch(() => ({}))) as {
+        hash?: unknown;
+        diffV?: unknown;
+      };
+      const currentHash = typeof payload.hash === 'string' ? payload.hash : '';
+      const diffV = typeof payload.diffV === 'number' ? payload.diffV : 0;
+
+      const response = buildUpdateResponse(
+        platform,
+        currentHash,
+        diffV,
+        url.origin
+      );
+      if (forceBootEnabled && 'update' in response) {
+        return json({ ...response, config: { forceBoot: true } });
+      }
+      return json(response);
+    }
+
+    if (url.pathname.startsWith('/artifacts/')) {
+      const filePath = safeResolve(url.pathname);
+      if (
+        !filePath ||
+        !fs.existsSync(filePath) ||
+        fs.statSync(filePath).isDirectory()
+      ) {
+        return new Response('not found', { status: 404 });
+      }
+
+      const file = Bun.file(filePath);
+      const ext = path.extname(filePath);
+      const contentType = contentTypes[ext] || 'application/octet-stream';
+
+      return new Response(request.method === 'HEAD' ? null : file, {
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': String(file.size),
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
+    return new Response('not found', { status: 404 });
+  },
+});
+
+console.log(`local e2e server listening on ${server.hostname}:${server.port}`);

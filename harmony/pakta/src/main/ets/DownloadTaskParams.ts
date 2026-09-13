@@ -1,0 +1,28 @@
+/**
+ * [INPUT]: 依赖 UpdateContext 的任务构造与 Harmony 文件/网络目标字段
+ * [OUTPUT]: 对外提供清理、全量、APP 差分、PPK 差分和普通下载的任务参数对象
+ * [POS]: UpdateContext 与 DownloadTask 之间的命令信封，集中表达制品身份、目录和冷启动截止时间
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+/**
+ * 下载任务参数类
+ */
+export class DownloadTaskParams {
+  // 任务类型常量
+  static readonly TASK_TYPE_CLEANUP: number = 0; // 保留hash和originHash
+  static readonly TASK_TYPE_PATCH_FULL: number = 1; // 全量补丁
+  static readonly TASK_TYPE_PATCH_FROM_APP: number = 2; // 从APP补丁
+  static readonly TASK_TYPE_PATCH_FROM_PPK: number = 3; // 从PPK补丁
+  static readonly TASK_TYPE_PLAIN_DOWNLOAD: number = 4; // 普通下载
+
+  type: number = DownloadTaskParams.TASK_TYPE_CLEANUP; // 任务类型
+  url: string = ''; // 下载URL
+  hash: string = ''; // 文件哈希值
+  originHash: string = ''; // 原始文件哈希值
+  targetFile: string = ''; // 目标文件路径
+  unzipDirectory: string = ''; // 解压目录路径
+  originDirectory: string = ''; // 原始文件目录路径
+  // Native cold-start orchestrator's absolute monotonic-uptime deadline. Zero
+  // uses the normal public download API's 10-minute whole-call cap.
+  deadlineUptimeMs: number = 0;
+}

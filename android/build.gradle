@@ -1,0 +1,254 @@
+/**
+ * [INPUT]: 依赖宿主 Gradle/AGP 扩展、React Native/Expo 安装状态、package.json、预编译 JNI 库与源码资源目录
+ * [OUTPUT]: 对外提供 Android Library 构建、过滤后的资源目录、版本/构建时间资源、新旧架构源集和 Expo 条件接入配置
+ * [POS]: android 构建选择边界，负责编译拓扑与文档资源隔离，不承载更新运行时规则
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+// Opaque identity shared by every release artifact produced in this Gradle
+// invocation (APK/AAB and their variants). It is deliberately not numeric:
+// the server must never infer ordering or time from buildTime.
+String releaseBuildIdentity = java.util.UUID.randomUUID().toString()
+
+def filteredMainResDir = file("${buildDir}/generated/res/main")
+task prepareFilteredMainResources(type: Copy) {
+    from "src/main/res"
+    into filteredMainResDir
+    exclude "**/*.md"
+}
+
+def safeExtGet(prop, fallback) {
+    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+}
+
+def isNewArchitectureEnabled() {
+    return project.hasProperty("newArchEnabled") && project.newArchEnabled == "true"
+}
+
+def supportsNamespace() {
+  def parsed = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION.tokenize('.')
+  def major = parsed[0].toInteger()
+  def minor = parsed[1].toInteger()
+
+  // Namespace support was added in 7.3.0
+  if (major == 7 && minor >= 3) {
+    return true
+  }
+
+  return major >= 8
+}
+
+def parseMajorVersion(String versionString) {
+    if (!versionString) {
+        return null
+    }
+
+    def matcher = (versionString =~ /(\d+)/)
+    if (matcher.find()) {
+        return matcher[0][0].toInteger()
+    }
+
+    return null
+}
+
+def resolveInstalledExpoMajorVersion(File projectDir) {
+    try {
+        def stdout = new ByteArrayOutputStream()
+        def stderr = new ByteArrayOutputStream()
+        def result = project.exec {
+            workingDir projectDir
+            commandLine 'node', '--print', "require('expo/package.json').version"
+            standardOutput = stdout
+            errorOutput = stderr
+            ignoreExitValue true
+        }
+
+        if (result.exitValue != 0) {
+            return null
+        }
+
+        return parseMajorVersion(stdout.toString().trim())
+    } catch (Exception ignored) {
+        return null
+    }
+}
+
+// Reads node_modules/expo/package.json the way Node would resolve it (walking
+// up from the app directory, so hoisted monorepo installs work) — a file read
+// instead of a `node` process at configuration time.
+def readInstalledExpoMajorVersion(File startDir) {
+    File dir = startDir
+    while (dir != null) {
+        File expoPackageJson = new File(dir, 'node_modules/expo/package.json')
+        if (expoPackageJson.isFile()) {
+            try {
+                return parseMajorVersion(
+                    new groovy.json.JsonSlurper().parseText(expoPackageJson.text).version)
+            } catch (Exception ignored) {
+                return null
+            }
+        }
+        dir = dir.parentFile
+    }
+    return null
+}
+
+def checkProjectInfo() {
+    def hasExpoModulesCore = rootProject.subprojects.any { it.name == 'expo-modules-core' }
+    def packageJsonFile = new File(rootProject.projectDir.parentFile, 'package.json')
+    
+    def hasExpoDependency = false
+    def projectVersion = '1.0.0' // Default version
+
+    if (packageJsonFile.exists()) {
+        def packageJson = new groovy.json.JsonSlurper().parseText(packageJsonFile.text)
+        projectVersion = packageJson.version ?: '1.0.0' // Get project version
+
+        // Check for expo dependency and version >= 50. Only resolved when
+        // expo-modules-core is part of the build and expo is declared; every
+        // other project pays nothing beyond this package.json read.
+        String expoVersionString = packageJson.dependencies?.expo ?: packageJson.devDependencies?.expo
+        Integer expoMajorVersion = null
+        if (hasExpoModulesCore && expoVersionString) {
+            // For pnpm catalogs (e.g. "catalog:native") the declared version is
+            // not numeric: prefer the installed package, then the declaration,
+            // and spawn `node` only as the last resort.
+            expoMajorVersion = readInstalledExpoMajorVersion(packageJsonFile.parentFile)
+                ?: parseMajorVersion(expoVersionString)
+                ?: resolveInstalledExpoMajorVersion(packageJsonFile.parentFile)
+        }
+
+        hasExpoDependency = expoMajorVersion != null && expoMajorVersion >= 50
+    }
+    
+    def isExpo = hasExpoModulesCore && hasExpoDependency
+    
+    // Return a map containing both pieces of information
+    return [isExpo: isExpo, version: projectVersion]
+}
+
+// Get project info map
+def projectInfo = checkProjectInfo()
+// Extract info into variables
+def projectVersion = projectInfo.version
+def expoProject = projectInfo.isExpo
+
+apply plugin: 'com.android.library'
+if (isNewArchitectureEnabled()) {
+    apply plugin: 'com.facebook.react'
+}
+
+if (expoProject) {
+    group = 'expo.modules.pakta'
+    version = projectVersion
+
+    def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+    apply from: expoModulesCorePlugin
+    applyKotlinExpoModulesCorePlugin()
+    // useExpoPublishing()
+    useCoreDependencies()
+} else {
+    group = 'cn.reactnative.modules.update'
+    version = projectVersion
+}
+
+android {
+    if (supportsNamespace()) {
+        namespace "cn.reactnative.modules.update"
+
+        sourceSets {
+            main {
+                manifest.srcFile "src/main/AndroidManifestNew.xml"
+            }
+        }
+    }
+    compileSdkVersion safeExtGet('compileSdkVersion', 34)
+    buildToolsVersion safeExtGet('buildToolsVersion', '34.0.0')
+    defaultConfig {
+        minSdkVersion safeExtGet('minSdkVersion', 21)
+        targetSdkVersion safeExtGet('targetSdkVersion', 34)
+        consumerProguardFiles "proguard.pro"
+        buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+    }
+    
+    sourceSets {
+        main {
+            // let gradle pack the shared library into apk
+            jniLibs.srcDirs = ['./lib']
+            // GEB navigation files live beside source files but are not Android resources.
+            // Exclude them explicitly so AGP does not try to merge CLAUDE.md as XML.
+            res.exclude '**/*.md', '**/CLAUDE.md', 'CLAUDE.md', 'xml/CLAUDE.md'
+            res.srcDirs = [filteredMainResDir]
+            if (isNewArchitectureEnabled()) {
+                java.srcDirs += ['src/newarch']
+            } else {
+                java.srcDirs += ['src/oldarch']
+            }
+            
+            // The Expo module lives in the default src/main/java tree and is
+            // only compiled when the host is an Expo (SDK 50+) project.
+            if (!expoProject) {
+                java.exclude 'expo/modules/pakta/**'
+            }
+        }
+    }
+
+    // AGP 9 disables the resValues feature for libraries by default; the
+    // pakta_build_time resource below needs it back on. The block exists
+    // since AGP 4, so guard like supportsNamespace() does for old projects.
+    def agpMajor = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION.tokenize('.')[0].toInteger()
+    if (agpMajor >= 4) {
+        buildFeatures {
+            resValues true
+        }
+    }
+
+    buildTypes {
+        release {
+            resValue("string", "pakta_build_time", releaseBuildIdentity)
+        }
+        debug {
+            resValue("string", "pakta_build_time", "0")
+        }
+    }
+    if (agpMajor >= 7) {
+        lint {
+            abortOnError false
+        }
+    } else {
+        lintOptions {
+            abortOnError false
+        }
+    }
+
+    testOptions {
+        // Pure-JVM unit tests (android/src/test): android.* calls return
+        // defaults instead of throwing, org.json comes from the real library.
+        unitTests.returnDefaultValues = true
+    }
+}
+
+afterEvaluate {
+    tasks.matching { it.name == 'preBuild' }.configureEach {
+        dependsOn prepareFilteredMainResources
+    }
+}
+
+repositories {
+    maven {
+        // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
+        url "$rootDir/../node_modules/react-native/android"
+    }
+}
+
+dependencies {
+    implementation 'com.facebook.react:react-native:+'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}
+if (isNewArchitectureEnabled()) {
+    react {
+        jsRootDir = file("../lib/")
+        libraryName = "update"
+        codegenJavaPackageName = "cn.reactnative.modules.update"
+    }
+}

@@ -1,0 +1,24 @@
+/**
+ * [INPUT]: 依赖 OpenHarmony workspace 包模型与 RNOH/测试依赖版本
+ * [OUTPUT]: 提供 Harmony workspace 元数据、依赖覆盖与 ArkTS 编译选项
+ * [POS]: harmony_use_pakta 工程级包清单，统筹 entry 与测试模块的依赖解析
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+{
+  modelVersion: '5.0.0',
+  description: 'Please describe the basic information.',
+  dependencies: {},
+  devDependencies: {
+    '@ohos/hypium': '1.0.19'
+  },
+  arkTs: {
+    compilerOptions: {
+      noImplicitAny: false,
+      suppressImplicitAnyIndexErrors: true,
+      strict: false,
+    },
+  },
+  overrides: {
+    '@rnoh/react-native-openharmony': '0.72.96',
+  },
+}

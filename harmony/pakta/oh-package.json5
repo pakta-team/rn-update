@@ -1,0 +1,19 @@
+// [INPUT]: 依赖 HAR 包模型、版本与 RNOH 0.72.96 宿主边界
+// [OUTPUT]: 提供 pakta 包名、版本、模型和精确锁定的 RNOH 运行时依赖
+// [POS]: pakta 发布元数据边界，供包管理器和消费端解析，不实现更新业务
+// [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+{
+  license: 'MIT',
+  types: '',
+  devDependencies: {
+    '@ohos/hypium': '1.0.19',
+  },
+  name: 'pakta',
+  description: '',
+  main: 'index.ets',
+  version: '1.1.0',
+  dependencies: {
+    '@rnoh/react-native-openharmony': '0.72.96',
+  },
+  modelVersion: '5.0.0',
+}

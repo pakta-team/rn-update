@@ -1,0 +1,18 @@
+# [INPUT]: 依赖 Harmony Hvigor、OHPM、CMake 与本地签名流程
+# [OUTPUT]: 排除 Harmony 工程依赖、构建中间物、分析缓存和本机签名材料
+# [POS]: harmony_use_pakta 工程卫生边界，确保证书与设备产物不进入源码地图
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+/node_modules
+/oh_modules
+/local.properties
+/.idea
+**/build
+/.hvigor
+.cxx
+/.clangd
+/.clang-format
+/.clang-tidy
+**/.test
+/.appanalyzer
+/signing.local.json5
+/local-signing/

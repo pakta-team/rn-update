@@ -1,0 +1,95 @@
+# [INPUT]: 依赖 Android/iOS/Harmony 构建、C++ 测试与 Metro 本地开发流程
+# [OUTPUT]: 排除客户端构建中间物、临时测试制品、Metro 缓存、IDE 状态和平台生成目录
+# [POS]: rn-update 工作区卫生配置，不改变 npm 发布内容
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+.vscode
+android/build
+android/obj
+android/.cxx
+*.iml
+
+# OSX
+#
+.DS_Store
+
+# Xcode
+#
+build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata
+*.xccheckout
+*.moved-aside
+DerivedData
+*.hmap
+*.ipa
+*.xcuserstate
+project.xcworkspace
+
+# Android/IJ
+#
+.idea
+.gradle
+local.properties
+**/.project
+**/.settings
+**/.classpath
+
+# node.js
+#
+node_modules/
+npm-debug.log
+**/.tmp/
+**/.metro-cache*/
+
+Example/**/.update
+Example/**/.pakta
+Example/**/.e2e-artifacts
+Example/**/artifacts
+Example/**/.detox
+Example/**/coverage
+Example/testHotUpdate/artifacts
+.e2e-rn077-oldarch
+
+yarn-error.log
+Example/testHotUpdate/.yarn
+android/bin
+Example/testHotUpdate/harmony
+Example/testHotUpdate/android/app/.cxx
+Example/harmony_use_pakta/libs
+**/mcp.json
+
+
+harmony/package
+harmony/pakta.har
+**/oh_modules
+harmony/pakta/.preview
+harmony/pakta/.cxx
+harmony/.tsconfig.harmony.json
+Example/harmony_use_pakta/harmony/entry/src/main/resources/rawfile/meta.json
+**/.hvigor
+Example/harmony_use_pakta/harmony/entry/src/main/cpp/generated
+Example/testHotUpdate/.e2e-artifacts
+harmony/pakta/src/main/cpp/android-generated
+**/ios/.xcode.env.local
+.bun-cache
+.ohpm-cache
+*.tgz
+package
+
+
+# Build outputs of scripts/test-patch-core.sh and scripts/test-update-flow-core.sh
+.tmp/
+
+# 内部 Agent 地图与本地自动化不得进入公开仓库。
+**/CLAUDE.md
+**/AGENTS.md
+**/.agents/
+**/.mcp.json
+**/sentry.properties

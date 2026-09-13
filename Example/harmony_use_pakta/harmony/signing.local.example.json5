@@ -1,0 +1,18 @@
+/**
+ * [INPUT]: 依赖开发者本机的 HarmonyOS/OpenHarmony 证书、profile 与 PKCS12 keystore
+ * [OUTPUT]: 提供 signing.local.json5 的字段模板，不包含可用口令或私钥
+ * [POS]: harmony_use_pakta 本机签名契约示例；复制为 signing.local.json5 后由 hvigorfile.ts 注入
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+{
+  "type": "HarmonyOS",
+  "material": {
+    "certpath": "C:\\path\\to\\debug.cer",
+    "keyAlias": "debugKey",
+    "keyPassword": "replace-me",
+    "profile": "C:\\path\\to\\debug.p7b",
+    "signAlg": "SHA256withECDSA",
+    "storeFile": "C:\\path\\to\\debug.p12",
+    "storePassword": "replace-me"
+  }
+}

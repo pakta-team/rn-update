@@ -1,0 +1,72 @@
+/**
+ * [INPUT]: 不依赖运行时代码，键集合需与英文字典和 i18n 调用保持兼容
+ * [OUTPUT]: 默认导出中文界面、错误、日志与更新流程文案字典
+ * [POS]: src/locales 的中文语义数据源，由 i18n.ts 装载，作为翻译键类型推导的一部分
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+export default {
+  // Common messages
+  checking_update: '正在检查更新...',
+  update_failed: '更新失败',
+
+  // Progress messages with interpolation
+  download_progress: '下载进度: {{progress}}%',
+
+  // Alert messages
+  alert_title: '提示',
+  alert_update_ready: '下载完毕，是否立即更新?',
+  alert_next_time: '下次再说',
+  alert_update_now: '立即更新',
+  alert_app_updated: '您的应用版本已更新，点击更新下载安装新版本',
+  alert_update_button: '更新',
+  alert_cancel: '取消',
+  alert_confirm: '确定',
+  alert_info: '信息',
+  alert_no_update_wait: '未发现更新，请等待10秒让服务器生成补丁包',
+
+  // Error messages
+  error_appkey_required: '需要提供 appKey',
+  error_no_endpoints: '未配置更新服务器端点',
+  error_client_singleton:
+    '检测到重复创建热更新 client：SDK 是进程级单例，请只创建一个 client 并在全局复用（运行期改配置请调用 client.setOptions）',
+  error_provider_singleton:
+    '检测到同时挂载多个 UpdateProvider：请确保应用中只有一个 UpdateProvider',
+  error_parse_version_info: '解析 currentVersionInfo 失败: {{info}}',
+  warn_unknown_bundle:
+    '当前二进制内嵌 bundle 未在更新平台注册，增量更新已降级为全量。请使用 pakta uploadIpa / uploadApk / uploadApp 上传对应安装包。',
+  error_update_check_failed: '更新检查失败',
+  error_cannot_connect_server: '无法连接到更新服务器。请检查网络连接。',
+  error_cannot_connect_backup:
+    '无法连接到更新服务器: {{message}}。正在尝试备用端点。',
+  error_diff_failed: 'diff 错误: {{message}}',
+  error_pdiff_failed: 'pdiff 错误: {{message}}',
+  error_full_patch_failed: '完整补丁错误: {{message}}',
+  error_all_promises_rejected: '所有请求都被拒绝',
+  error_ping_failed: 'Ping 失败',
+  error_ping_timeout: 'Ping 超时',
+  error_insecure_redirect: '请求被从 https 重定向到明文 http',
+  error_invalid_check_response: '更新检查响应不是有效结果',
+  error_http_status: '{{status}} {{statusText}}',
+  error_apk_pending_install: '安装包已下载完成，请在系统安装界面完成安装',
+  error_apk_download_failed: '安装包下载或安装失败',
+  error_reset_not_supported:
+    '当前安装的原生模块不支持 resetToPackagedBundle，请使用最新版 rn-update 重新打包后再试。',
+
+  // Development messages
+  dev_debug_disabled:
+    '您当前处于开发环境且未启用调试模式。{{matter}} 将不会执行。如需在开发环境中调试 {{matter}}，请在客户端中将 debug 设为 true。',
+  dev_log_prefix: 'rn-update: ',
+  dev_web_not_supported: 'rn-update 不支持 Web 平台，不会执行任何操作',
+
+  // More alert messages
+  alert_new_version_found:
+    '检查到新的版本{{name}}，是否下载？\n{{description}}',
+
+  // Development environment messages
+  dev_incremental_update_disabled:
+    '当前是开发环境，无法执行增量式热更新，重启不会生效。如果需要在开发环境中测试可生效的全量热更新（但也会在再次重启后重新连接 metro），请在网页管理后台的应用设置中打开"忽略时间戳"开关再重试。',
+
+  // Context error messages
+  error_use_update_outside_provider:
+    'useUpdate 必须在 UpdateProvider 内部使用。请使用 <UpdateProvider client={...}> 包裹您的组件树。',
+};

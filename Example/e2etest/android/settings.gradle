@@ -1,0 +1,12 @@
+/**
+ * [INPUT]: 依赖 Gradle settings API、React Native CLI 与 app 模块
+ * [OUTPUT]: 对外提供 Android 工程包含关系和 RN/Detox plugin 接入
+ * [POS]: Android 宿主构建拓扑入口
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+plugins { id("com.facebook.react.settings") }
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+rootProject.name = 'AwesomeProject'
+include ':app'
+includeBuild('../node_modules/@react-native/gradle-plugin')

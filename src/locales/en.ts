@@ -1,0 +1,78 @@
+/**
+ * [INPUT]: 不依赖运行时代码，键集合需与中文字典和 i18n 调用保持兼容
+ * [OUTPUT]: 默认导出英文界面、错误、日志与更新流程文案字典
+ * [POS]: src/locales 的英文语义数据源，由 i18n.ts 装载，禁止在此执行格式化或平台判断
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+export default {
+  // Common messages
+  checking_update: 'Checking for updates...',
+  update_failed: 'Update failed',
+
+  // Progress messages with interpolation
+  download_progress: 'Download progress: {{progress}}%',
+
+  // Alert messages
+  alert_title: 'Notice',
+  alert_update_ready: 'Download completed. Update now?',
+  alert_next_time: 'Later',
+  alert_update_now: 'Update Now',
+  alert_app_updated:
+    'Your app version has been updated. Click update to download and install the new version',
+  alert_update_button: 'Update',
+  alert_cancel: 'Cancel',
+  alert_confirm: 'OK',
+  alert_info: 'Info',
+  alert_no_update_wait:
+    'No update found, please wait 10s for the server to generate the patch package',
+
+  // Error messages
+  error_appkey_required: 'appKey is required',
+  error_no_endpoints: 'No update server endpoints configured',
+  error_client_singleton:
+    'A second update client was created: the SDK is a process-level singleton — create one client and reuse it everywhere (use client.setOptions to change options at runtime)',
+  error_provider_singleton:
+    'A second UpdateProvider was mounted: make sure the app renders exactly one UpdateProvider',
+  error_parse_version_info: 'Failed to parse currentVersionInfo: {{info}}',
+  warn_unknown_bundle:
+    'The bundle embedded in this binary is not registered on the update platform; incremental updates are degraded to full downloads. Upload the package with pakta uploadIpa / uploadApk / uploadApp.',
+  error_update_check_failed: 'Update check failed',
+  error_cannot_connect_server:
+    'Can not connect to update server. Please check your network.',
+  error_cannot_connect_backup:
+    'Can not connect to update server: {{message}}. Trying backup endpoints.',
+  error_diff_failed: 'diff error: {{message}}',
+  error_pdiff_failed: 'pdiff error: {{message}}',
+  error_full_patch_failed: 'full patch error: {{message}}',
+  error_all_promises_rejected: 'All promises were rejected',
+  error_ping_failed: 'Ping failed',
+  error_ping_timeout: 'Ping timeout',
+  error_insecure_redirect:
+    'Request was redirected from https to plaintext http',
+  error_invalid_check_response: 'Update check response is not a valid verdict',
+  error_http_status: '{{status}} {{statusText}}',
+  error_apk_pending_install:
+    'The APK has been downloaded, please complete the installation in the system installer',
+  error_apk_download_failed: 'Failed to download or install the APK',
+  error_reset_not_supported:
+    'resetToPackagedBundle is not available in the installed native module. Please rebuild the app with the latest rn-update.',
+
+  // Development messages
+  dev_debug_disabled:
+    'You are currently in the development environment and have not enabled debug mode. {{matter}} will not be performed. If you need to debug {{matter}} in the development environment, please set debug to true in the client.',
+  dev_log_prefix: 'rn-update: ',
+  dev_web_not_supported:
+    'rn-update does not support the Web platform and will not perform any operations',
+
+  // More alert messages
+  alert_new_version_found:
+    'New version {{name}} found. Download now?\n{{description}}',
+
+  // Development environment messages
+  dev_incremental_update_disabled:
+    'Currently in development environment, incremental hot update cannot be executed and restart will not take effect. If you need to test effective full hot update in development environment (but will reconnect to metro after restart), please enable "ignore timestamp" in app settings in admin dashboard and retry.',
+
+  // Context error messages
+  error_use_update_outside_provider:
+    'useUpdate must be used within an UpdateProvider. Please wrap your component tree with <UpdateProvider client={...}>.',
+};

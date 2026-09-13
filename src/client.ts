@@ -1,0 +1,1835 @@
+/**
+ * [INPUT]: 依赖 react-native 的平台与设备事件，依赖 core 冻结的启动版本身份/原生状态桥、endpoint 回退执行器、updateFlowCore 纯决策、error/telemetry/type 协议及 utils 网络工具
+ * [OUTPUT]: 对外提供 UpdateErrorListener、进程级 sharedState，以及带版本绑定成功确认的 Pakta 热更新客户端
+ * [POS]: src 的应用服务编排核心，默认连接 pakta.yoghourt.space/api，协调检查、下载、补丁、激活和端点降级，并保证本地生命周期到服务端回执的单次归类及激活前有界投递
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+import {
+  DeviceEventEmitter,
+  type EmitterSubscription,
+  Platform,
+} from 'react-native';
+import {
+  buildTime,
+  channel,
+  cInfo,
+  currentVersion,
+  currentVersionInfo,
+  getBundleHash,
+  isFirstTime,
+  isRolledBack,
+  PaktaModule,
+  packageVersion,
+  paktaNativeEventEmitter,
+  rolledBackVersion,
+  setLocalHashInfo,
+  supportedDiffVersion,
+} from './core';
+import { dedupeEndpoints, executeEndpointFallback } from './endpoint';
+import {
+  readErrorCode,
+  toUpdateError,
+  UpdateError,
+  type UpdateErrorCode,
+} from './error';
+import {
+  type ErrorReportContext,
+  type ErrorReportingOptions,
+  installGlobalErrorHandler,
+  type SerializedException,
+  serializeException,
+} from './errorReporting';
+import i18n from './i18n';
+import {
+  resolveServerEventHash,
+  resolveServerEventType,
+  truncateDetail,
+} from './telemetry';
+import type {
+  BeforeReloadContext,
+  CheckResult,
+  ClientOptions,
+  EventType,
+  ProgressData,
+  UpdateCheckState,
+  UpdateServerConfig,
+} from './type';
+import {
+  buildCheckFingerprint,
+  buildCheckRequestBody,
+  type DownloadPlan,
+  type DownloadStrategyType,
+  decideDownload,
+  isMirrorRetryableCode,
+  isValidCheckResult,
+} from './updateFlowCore';
+import {
+  assertWeb,
+  computeProgress,
+  DEFAULT_FETCH_TIMEOUT_MS,
+  fetchWithTimeout,
+  info,
+  log,
+  noop,
+  promiseAny,
+  setDebugLogging,
+  testUrls,
+  warn,
+} from './utils';
+
+/**
+ * Receives every error the client reports, alongside the report event type.
+ * The UpdateProvider subscribes to surface errors as lastError/Alert; user
+ * code can subscribe too. Listeners run before any throwError rethrow.
+ */
+export type UpdateErrorListener = (
+  error: UpdateError,
+  eventType: EventType
+) => void;
+
+const SERVER_PRESET: UpdateServerConfig = {
+  // 生产控制面唯一事实端点；显式 server 仍可覆盖为自建镜像。
+  main: ['https://pakta.yoghourt.space/api'],
+  // CDN 文件由仓库根 endpoints.json 提供；失败时仍保留 main 作为硬回退。
+  queryUrls: [
+    'https://cdn.jsdelivr.net/gh/pakta-team/rn-update@main/endpoints.json',
+  ],
+};
+
+const cloneServerConfig = (server: UpdateServerConfig): UpdateServerConfig => ({
+  main: dedupeEndpoints([...(server.main || [])]),
+  queryUrls: server.queryUrls ? [...server.queryUrls] : undefined,
+});
+
+// How long after a resolved reloadUpdate the process may still be alive before
+// the switch is considered not to have restarted the app (see switchVersion).
+const RELOAD_WATCHDOG_MS = 5000;
+
+// Non-2xx check responses are usually HTML error pages; keep only the head
+// for the error message (it can end up in an alert) and the logger.
+const MAX_HTTP_ERROR_TEXT = 200;
+
+const excludeConfiguredEndpoints = (
+  endpoints: string[],
+  configuredEndpoints: string[]
+) => {
+  const configured = new Set(configuredEndpoints);
+  return endpoints.filter((endpoint) => !configured.has(endpoint));
+};
+
+assertWeb();
+
+const createDefaultClientOptions = (): ClientOptions => ({
+  appKey: '',
+  autoMarkSuccess: true,
+  updateStrategy: __DEV__ ? 'alwaysAlert' : 'alertUpdateAndIgnoreError',
+  checkStrategy: 'both',
+  logger: noop,
+  debug: false,
+  throwError: false,
+  disableErrorReporting: false,
+});
+
+export const sharedState: {
+  progressHandlers: Record<string, EmitterSubscription>;
+  downloadingTasks: Record<string, Promise<string | undefined>>;
+  // Progress callbacks per hash: concurrent downloadUpdate callers of the
+  // same hash each register theirs here instead of the second one being
+  // silently dropped by the in-flight dedup.
+  progressCallbacks: Record<string, Set<(data: ProgressData) => void>>;
+  downloadedHash?: string;
+  toHash?: string;
+  apkStatus: 'downloading' | 'downloaded' | null;
+  marked: boolean;
+  applyingUpdate: boolean;
+} = {
+  progressHandlers: {},
+  downloadingTasks: {},
+  progressCallbacks: {},
+  downloadedHash: undefined,
+  apkStatus: null,
+  marked: false,
+  applyingUpdate: false,
+};
+
+// A reset/new switch invalidates ownership of older async completions and
+// watchdogs before the process-wide applyingUpdate flag can be reused.
+let applyingUpdateGeneration = 0;
+let reloadWatchdogTimer: ReturnType<typeof setTimeout> | undefined;
+
+const clearReloadWatchdog = () => {
+  if (reloadWatchdogTimer !== undefined) {
+    clearTimeout(reloadWatchdogTimer);
+    reloadWatchdogTimer = undefined;
+  }
+};
+
+const beginApplyingUpdate = (): number => {
+  clearReloadWatchdog();
+  sharedState.applyingUpdate = true;
+  return ++applyingUpdateGeneration;
+};
+
+const ownsApplyingUpdate = (generation: number): boolean =>
+  generation === applyingUpdateGeneration && sharedState.applyingUpdate;
+
+const finishApplyingUpdate = (generation: number): boolean => {
+  if (!ownsApplyingUpdate(generation)) {
+    return false;
+  }
+  clearReloadWatchdog();
+  sharedState.applyingUpdate = false;
+  return true;
+};
+
+const invalidateApplyingUpdate = () => {
+  applyingUpdateGeneration++;
+  clearReloadWatchdog();
+  sharedState.applyingUpdate = false;
+};
+
+const armReloadWatchdog = (generation: number, onTimeout: () => void) => {
+  if (!ownsApplyingUpdate(generation)) {
+    return;
+  }
+  clearReloadWatchdog();
+  const timer = setTimeout(() => {
+    // A cancelled callback may already be queued; both identities must match.
+    if (reloadWatchdogTimer !== timer || !ownsApplyingUpdate(generation)) {
+      return;
+    }
+    reloadWatchdogTimer = undefined;
+    sharedState.applyingUpdate = false;
+    onTimeout();
+  }, RELOAD_WATCHDOG_MS);
+  reloadWatchdogTimer = timer;
+};
+
+// The SDK is a process-level singleton: module-level sharedState, the global
+// i18n locale and the native update state are all per-process, so a second
+// client would silently share (and fight over) them. Constructing one is a
+// hard integration error, except for the idempotent re-creation of the same
+// client (same appKey), which dev fast-refresh triggers legitimately.
+let activeClient: Pakta | undefined;
+
+const assertHash = (hash: string) => {
+  if (!sharedState.downloadedHash) {
+    log(`no downloaded hash yet, ignore switch to ${hash}`);
+    return;
+  }
+  if (hash !== sharedState.downloadedHash) {
+    log(`use downloaded hash ${sharedState.downloadedHash} first`);
+    return;
+  }
+  return true;
+};
+
+export class Pakta {
+  options: ClientOptions = createDefaultClientOptions();
+  clientType: 'Pakta' = 'Pakta';
+  lastChecking?: number;
+  lastRespJson?: Promise<CheckResult>;
+  lastCheckFingerprint?: string;
+  // Endpoint that most recently served a successful checkUpdate; telemetry
+  // reuses it instead of re-running the fallback race.
+  private lastWorkingEndpoint?: string;
+  private syncedNativeConfigJson?: string;
+  private pendingNativeConfigJson?: string;
+  private nativeConfigSyncInFlight = false;
+  private reportedInvalidUpdates = new Set<string>();
+  private reportedExceptions = new WeakSet<object>();
+  private globalErrorCleanup?: () => void;
+
+  version = cInfo.rnu;
+  loggerPromise = (() => {
+    let resolve: (value?: unknown) => void = () => {};
+    const promise = new Promise((res) => {
+      resolve = res;
+    });
+    return {
+      promise,
+      resolve,
+    };
+  })();
+
+  constructor(options: ClientOptions) {
+    if (activeClient) {
+      if (activeClient.options.appKey === options.appKey) {
+        // Same client re-created (e.g. fast refresh re-running the module
+        // that builds it): apply the latest options and hand back the
+        // existing instance instead of forking process-level state.
+        activeClient.setOptions(options);
+        // biome-ignore lint/correctness/noConstructorReturn: intentional singleton — identical re-creation must yield the existing instance
+        return activeClient;
+      }
+      throw new UpdateError(
+        i18n.t('error_client_singleton'),
+        'SINGLETON_VIOLATION'
+      );
+    }
+    this.options.server = cloneServerConfig(SERVER_PRESET);
+
+    i18n.setLocale(options.locale ?? 'zh');
+
+    // Every native platform (Harmony included) needs the appKey; without it
+    // the check URL is `/checkUpdate/` and the failure would surface as an
+    // opaque 404 instead of this explicit code.
+    if (Platform.OS !== 'web' && !options.appKey) {
+      throw new UpdateError(i18n.t('error_appkey_required'), 'APPKEY_REQUIRED');
+    }
+
+    this.setOptions(options);
+    if (isRolledBack) {
+      this.report({
+        type: 'rollback',
+        data: {
+          rolledBackVersion,
+        },
+      });
+    }
+    activeClient = this;
+  }
+
+  /**
+   * Bumped on every setOptions call. `options` is mutated in place (its
+   * identity never changes), so reactive consumers (the UpdateProvider)
+   * subscribe via onOptionsChange and re-read using this version as the
+   * change signal.
+   */
+  optionsVersion = 0;
+  private optionsListeners = new Set<() => void>();
+  /**
+   * Subscribe to option changes (any setOptions call). Returns an
+   * unsubscribe function.
+   */
+  onOptionsChange = (listener: () => void) => {
+    this.optionsListeners.add(listener);
+    return () => {
+      this.optionsListeners.delete(listener);
+    };
+  };
+
+  setOptions = (options: Partial<ClientOptions>) => {
+    for (const [key, value] of Object.entries(options)) {
+      if (value !== undefined) {
+        (this.options as any)[key] =
+          key === 'server'
+            ? cloneServerConfig(value as UpdateServerConfig)
+            : value;
+        if (key === 'logger') {
+          this.loggerPromise.resolve();
+        }
+        if (key === 'locale') {
+          // The constructor applies the initial locale; a runtime switch (or
+          // the fast-refresh re-creation path, which only goes through here)
+          // must apply just the same.
+          i18n.setLocale(value as 'zh' | 'en');
+        }
+      }
+    }
+    setDebugLogging(!!this.options.debug);
+    this.optionsVersion++;
+    for (const listener of this.optionsListeners) {
+      try {
+        listener();
+      } catch (e: any) {
+        log('onOptionsChange listener error:', e?.message || e);
+      }
+    }
+    this.syncAutomaticErrorReporting();
+    this.syncNativeConfig();
+  };
+
+  private syncAutomaticErrorReporting = (): void => {
+    if (this.options.disableTelemetry || this.options.disableErrorReporting) {
+      this.globalErrorCleanup?.();
+      return;
+    }
+    this.enableErrorReporting();
+  };
+
+  /** Build the subset of options used by the native cold-start check. */
+  private getNativeConfig = (): Record<string, unknown> | undefined => {
+    if (
+      Platform.OS === 'web' ||
+      typeof PaktaModule.syncNativeConfig !== 'function'
+    ) {
+      // Older natives lack the method; on web PaktaModule is a noop Proxy
+      // and the feature-detect would false-positive.
+      return undefined;
+    }
+    const {
+      appKey,
+      server,
+      updateStrategy,
+      checkStrategy,
+      disableNativeCheck,
+    } = this.options;
+    if (disableNativeCheck) {
+      // Explicit opt-out: keep the identity fields so the persisted config
+      // still describes this app, and let the orchestrators bail on `disabled`
+      // before any IO.
+      return { disabled: true, appKey, rnu: cInfo.rnu, rn: cInfo.rn };
+    }
+    if (!appKey || !server?.main?.length) {
+      // Unusable rather than merely absent: the JS check would fail on these
+      // options too (NO_ENDPOINTS / APPKEY_REQUIRED). The caller turns this
+      // into an explicit disabled state.
+      return undefined;
+    }
+    // An app that turned automatic checks off (checkStrategy: null) must not
+    // be handed a version switch it never asked for. The cold-start check
+    // still runs and still downloads — that is what keeps a bricked device
+    // rescuable — but activation waits for the JS side, or for the server's
+    // explicit per-version forceBoot directive (shouldActivateAfterDownload).
+    const autoCheckEnabled = checkStrategy != null;
+    return {
+      appKey,
+      channel,
+      packageVersion: this.getEffectivePackageVersion(),
+      endpoints: server.main,
+      queryUrls: server.queryUrls ?? [],
+      // The native check may activate a downloaded version (next launch)
+      // only under the silent strategies; alert-style strategies keep
+      // activation with the JS side (§6/§10.1).
+      afterDownload:
+        autoCheckEnabled &&
+        (updateStrategy === 'silentAndNow' ||
+          updateStrategy === 'silentAndLater')
+          ? 'setNeedUpdate'
+          : 'none',
+      rnu: cInfo.rnu,
+      rn: cInfo.rn,
+    };
+  };
+
+  private getNativeConfigJson = (): string | undefined => {
+    const config = this.getNativeConfig();
+    return config ? JSON.stringify(config) : undefined;
+  };
+
+  private flushNativeConfig = () => {
+    if (this.nativeConfigSyncInFlight) {
+      return;
+    }
+    const configJson = this.pendingNativeConfigJson;
+    this.pendingNativeConfigJson = undefined;
+    if (!configJson || configJson === this.syncedNativeConfigJson) {
+      return;
+    }
+    this.nativeConfigSyncInFlight = true;
+    let syncResult: Promise<void>;
+    try {
+      syncResult = Promise.resolve(PaktaModule.syncNativeConfig(configJson));
+    } catch (e: any) {
+      this.nativeConfigSyncInFlight = false;
+      log('syncNativeConfig failed:', e?.message || e);
+      return;
+    }
+    syncResult
+      .then(() => {
+        this.syncedNativeConfigJson = configJson;
+      })
+      .catch((e: any) => {
+        log('syncNativeConfig failed:', e?.message || e);
+      })
+      .finally(() => {
+        this.nativeConfigSyncInFlight = false;
+        this.flushNativeConfig();
+      });
+  };
+
+  /**
+   * Tell the native cold-start orchestrator that this process already holds a
+   * valid check response for the current config, so its delayed round (5s
+   * after launch) does not repeat the request. Fire-and-forget: a failure
+   * costs one duplicate check. Never called on a failed check — the native
+   * rescue must keep running when JS could not reach the server.
+   */
+  private markJsCheckCompleted = () => {
+    if (
+      Platform.OS === 'web' ||
+      typeof PaktaModule.markJsCheckCompleted !== 'function'
+    ) {
+      return;
+    }
+    const configJson = this.getNativeConfigJson();
+    if (!configJson) {
+      return;
+    }
+    try {
+      Promise.resolve(PaktaModule.markJsCheckCompleted(configJson)).catch(
+        (e: any) => {
+          log('markJsCheckCompleted failed:', e?.message || e);
+        }
+      );
+    } catch (e: any) {
+      log('markJsCheckCompleted failed:', e?.message || e);
+    }
+  };
+
+  private syncNativeConfig = () => {
+    if (
+      Platform.OS === 'web' ||
+      typeof PaktaModule.syncNativeConfig !== 'function'
+    ) {
+      return;
+    }
+    const configJson = this.getNativeConfigJson();
+    if (!configJson) {
+      // No usable config (empty appKey / no endpoints) is almost always a
+      // transient state while options are being assembled. Persisting a
+      // disabled config over the last good one would switch off the
+      // cold-start rescue for every later launch, so keep what native has.
+      // (Web and older natives never reach this point — no method.)
+      log('native check config unusable, keeping the last synced config');
+      return;
+    }
+    // Always record the latest desired value, even when it matches the last
+    // completed write. Example: A synced -> B in flight -> options revert to
+    // A. Comparing only with synced(A) would drop the revert and leave native
+    // storage at B after that in-flight write completes.
+    // Coalesce rapid setOptions calls, but serialize bridge writes so an older
+    // completion can never overwrite the newest desired configuration.
+    this.pendingNativeConfigJson = configJson;
+    this.flushNativeConfig();
+  };
+
+  /** Package version used by every server-side update decision. */
+  getEffectivePackageVersion = () =>
+    this.options.overridePackageVersion || packageVersion;
+
+  private jsonValuesEqual = (left: unknown, right: unknown): boolean => {
+    const compare = (a: unknown, b: unknown): boolean => {
+      if (a === b) {
+        return true;
+      }
+      if (Array.isArray(a) || Array.isArray(b)) {
+        return (
+          Array.isArray(a) &&
+          Array.isArray(b) &&
+          a.length === b.length &&
+          a.every((value, index) => compare(value, b[index]))
+        );
+      }
+      if (
+        a === null ||
+        b === null ||
+        typeof a !== 'object' ||
+        typeof b !== 'object'
+      ) {
+        return false;
+      }
+      const leftObject = a as Record<string, unknown>;
+      const rightObject = b as Record<string, unknown>;
+      // Match JSON.stringify semantics for request extras: object properties
+      // whose value is undefined are omitted from the wire fingerprint.
+      const leftKeys = Object.keys(leftObject)
+        .filter((key) => leftObject[key] !== undefined)
+        .sort();
+      const rightKeys = Object.keys(rightObject)
+        .filter((key) => rightObject[key] !== undefined)
+        .sort();
+      return (
+        leftKeys.length === rightKeys.length &&
+        leftKeys.every(
+          (key, index) =>
+            key === rightKeys[index] &&
+            compare(leftObject[key], rightObject[key])
+        )
+      );
+    };
+
+    return compare(left, right);
+  };
+
+  private providerMounted = false;
+  /**
+   * Called by UpdateProvider on mount. A second concurrently mounted
+   * provider is the same integration error as a second client — fail hard
+   * instead of double-subscribing app-state listeners and update checks.
+   * Returns the release function used on unmount.
+   */
+  claimProviderMount = () => {
+    if (this.providerMounted) {
+      throw new UpdateError(
+        this.t('error_provider_singleton'),
+        'SINGLETON_VIOLATION'
+      );
+    }
+    this.providerMounted = true;
+    return () => {
+      this.providerMounted = false;
+    };
+  };
+
+  /**
+   * Get translated text using the current Pakta locale
+   * @param key - Translation key
+   * @param values - Values for interpolation (optional)
+   * @returns Translated string
+   */
+  t = (key: string, values?: Record<string, string | number>) => {
+    return i18n.t(key as any, values);
+  };
+
+  reportInvalidUpdateOnce = (
+    reason: 'missingHash' | 'noArtifact',
+    hash = ''
+  ) => {
+    const key = `${this.options.appKey}:${reason}:${hash}`;
+    if (this.reportedInvalidUpdates.has(key)) {
+      return;
+    }
+    this.reportedInvalidUpdates.add(key);
+    this.report({
+      type: 'errorUpdate',
+      message:
+        reason === 'missingHash'
+          ? 'update response is missing a version hash'
+          : 'update response contains no downloadable artifact',
+      ...(hash ? { data: { newVersion: hash } } : {}),
+    });
+  };
+
+  /**
+   * Best-effort JS exception reporting for the currently running OTA release.
+   * It is intentionally synchronous to call and never throws; the transport
+   * runs in the background and preserves the app's existing error flow.
+   */
+  captureException = (
+    error: unknown,
+    context: ErrorReportContext = {}
+  ): void => {
+    try {
+      if (
+        __DEV__ ||
+        this.options.disableTelemetry ||
+        this.options.disableErrorReporting
+      ) {
+        return;
+      }
+      if (
+        error !== null &&
+        (typeof error === 'object' || typeof error === 'function')
+      ) {
+        const object = error as object;
+        if (this.reportedExceptions.has(object)) {
+          return;
+        }
+        this.reportedExceptions.add(object);
+      }
+      this.reportExceptionToServer(serializeException(error, context));
+    } catch (e: any) {
+      log('exception telemetry error:', e?.message || e);
+    }
+  };
+
+  /**
+   * Ensure uncaught JS exception capture is installed and return a runtime
+   * cleanup function. Capture is installed automatically by default; this
+   * method remains an idempotent compatibility hook. The wrapper always
+   * chains the handler that was installed before it and only restores that
+   * handler when no later integration has replaced ours.
+   */
+  enableErrorReporting = (
+    options: ErrorReportingOptions = {}
+  ): (() => void) => {
+    if (
+      options.captureGlobal === false ||
+      this.options.disableTelemetry ||
+      this.options.disableErrorReporting
+    ) {
+      return () => {};
+    }
+    if (this.globalErrorCleanup) {
+      return this.globalErrorCleanup;
+    }
+    const uninstall = installGlobalErrorHandler((error, isFatal) => {
+      this.captureException(error, { fatal: isFatal === true });
+    });
+    let active = true;
+    const cleanup = () => {
+      if (!active) {
+        return;
+      }
+      active = false;
+      uninstall();
+      if (this.globalErrorCleanup === cleanup) {
+        this.globalErrorCleanup = undefined;
+      }
+    };
+    this.globalErrorCleanup = cleanup;
+    return cleanup;
+  };
+
+  private reportExceptionToServer = (error: SerializedException): void => {
+    try {
+      if (
+        __DEV__ ||
+        this.options.disableTelemetry ||
+        this.options.disableErrorReporting ||
+        !currentVersion
+      ) {
+        return;
+      }
+      const { appKey } = this.options;
+      const endpoint =
+        this.lastWorkingEndpoint || this.options.server?.main?.[0];
+      if (!appKey || !endpoint) {
+        return;
+      }
+      fetchWithTimeout(
+        `${endpoint}/report/${appKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'js_exception',
+            hash: currentVersion,
+            packageVersion: this.getEffectivePackageVersion(),
+            cInfo,
+            error,
+          }),
+        },
+        DEFAULT_FETCH_TIMEOUT_MS
+      ).catch((e: any) => {
+        log('exception telemetry report failed:', e?.message || e);
+      });
+    } catch (e: any) {
+      log('exception telemetry error:', e?.message || e);
+    }
+  };
+
+  report = async ({
+    type,
+    message = '',
+    code,
+    data = {},
+  }: {
+    type: EventType;
+    message?: string;
+    code?: UpdateErrorCode;
+    data?: Record<string, string | number>;
+  }) => {
+    log(`${type} ${code ? `[${code}] ` : ''}${message}`);
+    // The task starts immediately. Most reports remain fire-and-forget, but
+    // downloadSuccess awaits this bounded task before a silent restart.
+    const telemetryTask = this.reportToServer({ type, message, code, data });
+    if (this.options.logger === noop) {
+      // Wait briefly for a logger to arrive via setOptions (e.g. the rollback
+      // report fires in the constructor before the user configures one), but
+      // give up after a bound instead of retaining the closure forever when
+      // no logger is ever provided.
+      // The shared SDK is compiled with both DOM/RN and Node ambient timer
+      // declarations, whose overloads disagree on the handle type.
+      let timer: unknown;
+      await Promise.race([
+        this.loggerPromise.promise,
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 10 * 1000);
+        }),
+      ]);
+      // React Native/browser timers are numbers; Node's ambient types expose
+      // an object handle. Number() preserves the native numeric id in both
+      // environments and keeps this shared SDK type-checkable in e2etest.
+      if (timer !== undefined) {
+        clearTimeout(Number(timer));
+      }
+    }
+    const { logger = noop, appKey } = this.options;
+    const overridePackageVersion = this.options.overridePackageVersion;
+    try {
+      logger({
+        type,
+        data: {
+          appKey,
+          currentVersion,
+          cInfo,
+          packageVersion,
+          overridePackageVersion,
+          buildTime,
+          message,
+          code,
+          ...currentVersionInfo,
+          ...data,
+        },
+      });
+    } catch (e: any) {
+      // A user-provided logger must never break the update flow, and report()
+      // calls are fire-and-forget so a throw here would be an unhandled
+      // rejection.
+      log('logger error:', e?.message || e);
+    }
+    return telemetryTask;
+  };
+  /**
+   * Best-effort lifecycle event reporting to the update server (aggregate
+   * counts + sampled failure details power the version health view and the
+   * rollback safety net server-side). Single POST to the last known working
+   * endpoint, no retry, no fallback race; any failure is swallowed — telemetry
+   * must never affect the update flow. Opt out with disableTelemetry.
+   */
+  private reportToServer = ({
+    type,
+    message = '',
+    code,
+    data = {},
+  }: {
+    type: EventType;
+    message?: string;
+    code?: UpdateErrorCode;
+    data?: Record<string, string | number>;
+  }): Promise<void> => {
+    try {
+      if (__DEV__ || this.options.disableTelemetry) {
+        return Promise.resolve();
+      }
+      const serverType = resolveServerEventType(type, code);
+      if (!serverType) {
+        return Promise.resolve();
+      }
+      const { appKey } = this.options;
+      const endpoint =
+        this.lastWorkingEndpoint || this.options.server?.main?.[0];
+      if (!appKey || !endpoint) {
+        return Promise.resolve();
+      }
+      const hash = resolveServerEventHash({ serverType, data, currentVersion });
+      if (!hash) {
+        return Promise.resolve();
+      }
+      return fetchWithTimeout(
+        `${endpoint}/report/${appKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: serverType,
+            hash,
+            packageVersion: this.getEffectivePackageVersion(),
+            channel,
+            buildTime,
+            cInfo,
+            detail: truncateDetail(message || undefined),
+          }),
+        },
+        DEFAULT_FETCH_TIMEOUT_MS
+      )
+        .then(() => undefined)
+        .catch((e: any) => {
+          log('telemetry report failed:', e?.message || e);
+        });
+    } catch (e: any) {
+      log('telemetry error:', e?.message || e);
+      return Promise.resolve();
+    }
+  };
+  throwIfEnabled = (e: Error) => {
+    if (this.options.throwError) {
+      throw e;
+    }
+  };
+  private errorListeners = new Set<UpdateErrorListener>();
+  private emittedErrors = new WeakSet<Error>();
+  /**
+   * Subscribe to every error the client reports (regardless of throwError).
+   * Returns an unsubscribe function.
+   */
+  onError = (listener: UpdateErrorListener) => {
+    this.errorListeners.add(listener);
+    return () => {
+      this.errorListeners.delete(listener);
+    };
+  };
+  /**
+   * Whether this exact error object already went through emitError (and was
+   * therefore delivered to onError subscribers). Lets UI layers decide if a
+   * caught error still needs surfacing — checking `e.code` is not enough,
+   * since axios/system errors carry their own code without ever entering the
+   * pipeline.
+   */
+  wasEmitted = (e: unknown): boolean =>
+    e instanceof Error && this.emittedErrors.has(e);
+  /**
+   * Single exit point for errors: reports to the logger (with the stable
+   * code) and notifies onError listeners. Whether to also throw stays with
+   * the caller (throwIfEnabled or an unconditional rethrow).
+   */
+  private emitError = (
+    error: UpdateError,
+    type: EventType,
+    {
+      message = error.message,
+      data,
+    }: { message?: string; data?: Record<string, string | number> } = {}
+  ) => {
+    this.emittedErrors.add(error);
+    this.report({
+      type,
+      message,
+      code: error.code,
+      // Structured context from the error (e.g. HTTP status) reaches the
+      // logger; explicit data wins on key conflicts.
+      data: error.extra ? { ...error.extra, ...data } : data,
+    });
+    for (const listener of this.errorListeners) {
+      try {
+        listener(error, type);
+      } catch (e: any) {
+        log('onError listener error:', e?.message || e);
+      }
+    }
+  };
+  notifyAfterCheckUpdate = (state: UpdateCheckState) => {
+    const { afterCheckUpdate } = this.options;
+    if (!afterCheckUpdate) {
+      return;
+    }
+    // 这里仅做状态通知，不阻塞原有检查流程
+    Promise.resolve(afterCheckUpdate(state)).catch((error: any) => {
+      log('afterCheckUpdate failed:', error?.message || error);
+    });
+  };
+  runBeforeReload = async (context: BeforeReloadContext) => {
+    const { beforeReload } = this.options;
+    if (!beforeReload) {
+      return true;
+    }
+    const shouldReload = await beforeReload(context);
+    if (shouldReload === false) {
+      log('beforeReload returned false, skipping reload');
+      return false;
+    }
+    return true;
+  };
+  getCheckUrl = (endpoint: string) => {
+    return `${endpoint}/checkUpdate/${this.options.appKey}`;
+  };
+  getConfiguredCheckEndpoints = () => {
+    const { server } = this.options;
+    if (!server) {
+      return [];
+    }
+    return dedupeEndpoints(server.main);
+  };
+  getRemoteEndpoints = async () => {
+    const { server } = this.options;
+    if (!server?.queryUrls?.length) {
+      return [];
+    }
+    try {
+      // Race the parsed lists, not the raw responses: fetch resolves for
+      // 404/403/5xx and anti-bot HTML too, and this path only runs once the
+      // main endpoints are already failing — a mirror that answers first
+      // with an error page must not beat the healthy one.
+      const remoteEndpoints = await promiseAny(
+        server.queryUrls.map(async (queryUrl) => {
+          const resp = await fetchWithTimeout(
+            queryUrl,
+            {},
+            DEFAULT_FETCH_TIMEOUT_MS
+          );
+          if (!resp.ok) {
+            throw Error(`${queryUrl}: ${resp.status}`);
+          }
+          const list: unknown = await resp.json();
+          if (!Array.isArray(list)) {
+            throw Error(`${queryUrl}: not an endpoint list`);
+          }
+          return list;
+        })
+      );
+      log('fetch endpoints:', remoteEndpoints);
+      return excludeConfiguredEndpoints(
+        dedupeEndpoints(
+          remoteEndpoints.filter(
+            // The list is fetched from a public mirror; it may add
+            // endpoints but never move the check outside TLS.
+            (endpoint): endpoint is string =>
+              typeof endpoint === 'string' && /^https:\/\//i.test(endpoint)
+          )
+        ),
+        this.getConfiguredCheckEndpoints()
+      );
+    } catch (e) {
+      log('failed to fetch endpoints from: ', server.queryUrls, e);
+    }
+    return [];
+  };
+  requestCheckResult = async (
+    endpoint: string,
+    fetchPayload: Parameters<typeof fetch>[1],
+    signal?: AbortSignal
+  ) => {
+    const resp = await fetchWithTimeout(
+      this.getCheckUrl(endpoint),
+      signal ? { ...fetchPayload, signal } : fetchPayload,
+      DEFAULT_FETCH_TIMEOUT_MS
+    );
+
+    if (!resp.ok) {
+      const respText = (await resp.text()).slice(0, MAX_HTTP_ERROR_TEXT);
+      throw new UpdateError(
+        this.t('error_http_status', {
+          status: resp.status,
+          statusText: respText,
+        }),
+        'HTTP_STATUS',
+        { extra: { status: resp.status } }
+      );
+    }
+
+    const result: unknown = await resp.json();
+    if (!isValidCheckResult(result)) {
+      // A 2xx that is not a verdict (`{"error": ...}`, a captive-portal page
+      // that parsed, ...) is a failed endpoint: throwing keeps the fallback
+      // moving to the next one instead of treating it as "no update".
+      throw new UpdateError(
+        this.t('error_invalid_check_response'),
+        'INVALID_RESPONSE'
+      );
+    }
+    return result;
+  };
+  fetchCheckResult = async (fetchPayload: Parameters<typeof fetch>[1]) => {
+    const { endpoint, value } = await executeEndpointFallback<CheckResult>({
+      configuredEndpoints: this.getConfiguredCheckEndpoints(),
+      getRemoteEndpoints: this.getRemoteEndpoints,
+      tryEndpoint: async (currentEndpoint, signal) => {
+        try {
+          return await this.requestCheckResult(
+            currentEndpoint,
+            fetchPayload,
+            signal
+          );
+        } catch (e) {
+          log('check endpoint failed', currentEndpoint, e);
+          throw e;
+        }
+      },
+      onFirstFailure: ({ error }) => {
+        this.report({
+          type: 'errorChecking',
+          message: this.t('error_cannot_connect_backup', {
+            message: error.message,
+          }),
+        });
+      },
+    });
+
+    log('check endpoint success', endpoint);
+    this.lastWorkingEndpoint = endpoint;
+    return value;
+  };
+  /**
+   * Reuse the native cold-start check's cached response when fresh
+   * (NATIVE_CHECKUPDATE_DESIGN §10.3) instead of re-checking. Returns
+   * undefined whenever the cache is absent, stale, or unreadable — any
+   * failure falls through to a normal network check.
+   */
+  private readNativeCheckCache = async (
+    requestBody: Record<string, any>
+  ): Promise<CheckResult | undefined> => {
+    try {
+      if (__DEV__ || typeof PaktaModule.getNativeCheckCache !== 'function') {
+        return undefined;
+      }
+      const raw = await Promise.resolve(PaktaModule.getNativeCheckCache());
+      if (!raw || typeof raw !== 'string') {
+        return undefined;
+      }
+      const entry = JSON.parse(raw);
+      const config = this.getNativeConfig();
+      const cachedRequest =
+        typeof entry?.request === 'string'
+          ? JSON.parse(entry.request)
+          : undefined;
+      const cachedConfig =
+        typeof entry?.config === 'string'
+          ? JSON.parse(entry.config)
+          : undefined;
+      if (
+        typeof entry?.ts !== 'number' ||
+        typeof entry?.body !== 'string' ||
+        !this.jsonValuesEqual(cachedRequest, requestBody) ||
+        !config ||
+        !this.jsonValuesEqual(cachedConfig, config)
+      ) {
+        return undefined;
+      }
+      const ageSeconds = Date.now() / 1000 - entry.ts;
+      if (ageSeconds < 0 || ageSeconds > 120) {
+        return undefined;
+      }
+      const result: unknown = JSON.parse(entry.body);
+      // Same schema gate as the network path: a native old enough to have
+      // cached a 200 `{"error": ...}` must not turn it into "no update".
+      if (!isValidCheckResult(result)) {
+        return undefined;
+      }
+      log('reusing native check response cache');
+      return result;
+    } catch {
+      return undefined;
+    }
+  };
+
+  assertDebug = (matter: string) => {
+    if (__DEV__ && !this.options.debug) {
+      info(this.t('dev_debug_disabled', { matter }));
+      return false;
+    }
+    return true;
+  };
+  markSuccess = async () => {
+    if (sharedState.marked) {
+      log('markSuccess skipped: already marked');
+      return;
+    }
+    if (__DEV__) {
+      log('markSuccess skipped: development build');
+      return;
+    }
+    if (!isFirstTime) {
+      warn('markSuccess skipped: native launch marker is false', {
+        expectedHash: currentVersion,
+      });
+      return;
+    }
+    try {
+      const accepted = await Promise.resolve(
+        PaktaModule.markSuccess(currentVersion)
+      );
+      if (!accepted) {
+        warn('markSuccess rejected by native', {
+          expectedHash: currentVersion,
+        });
+        return false;
+      }
+    } catch (e) {
+      const err = toUpdateError(e, 'MARK_SUCCESS_FAILED');
+      this.emitError(err, 'errorMarkSuccess');
+      throw err;
+    }
+    sharedState.marked = true;
+    this.report({ type: 'markSuccess' });
+    // 救砖回执:这个版本是被救援通道送进来的,且活过了健康确认——遥测里
+    // 一条 rescue 回执就是"这台设备被捞回来了"的证据。
+    if (currentVersionInfo.forceBootRescue) {
+      this.report({ type: 'forceBootRescue' });
+    }
+    if (currentVersionInfo.crashRescue) {
+      this.report({ type: 'crashRescue' });
+    }
+    return true;
+  };
+  /**
+   * Reload into a downloaded version. Resolves true once the native reload
+   * was requested, false when the call was ignored (not the downloaded hash,
+   * a switch already in progress, beforeReload declined, dev without debug).
+   */
+  switchVersion = async (hash: string): Promise<boolean> => {
+    if (!this.assertDebug('switchVersion()')) {
+      return false;
+    }
+    if (!assertHash(hash)) {
+      return false;
+    }
+    if (sharedState.applyingUpdate) {
+      log(`switchVersion: ${hash} ignored, a switch is already in progress`);
+      return false;
+    }
+    log(`switchVersion: ${hash}`);
+    const applyingGeneration = beginApplyingUpdate();
+    try {
+      if (!(await this.runBeforeReload({ type: 'switchVersion', hash }))) {
+        finishApplyingUpdate(applyingGeneration);
+        return false;
+      }
+    } catch (e) {
+      finishApplyingUpdate(applyingGeneration);
+      // A throw from the user's beforeReload hook is business-code failure,
+      // not an update-pipeline one: give it a distinct code so telemetry
+      // excludes it from the server-side patch-health stats.
+      const err = toUpdateError(e, 'USER_HOOK_ERROR');
+      this.emitError(err, 'errorSwitchVersion', {
+        data: { newVersion: hash },
+      });
+      throw err;
+    }
+    // resetToPackagedBundle may have completed while beforeReload awaited.
+    if (!ownsApplyingUpdate(applyingGeneration)) {
+      return false;
+    }
+    try {
+      await PaktaModule.reloadUpdate({ hash });
+    } catch (e) {
+      // Do not let a superseded rejection clear a newer switch.
+      finishApplyingUpdate(applyingGeneration);
+      const err = toUpdateError(e, 'SWITCH_VERSION_FAILED');
+      this.emitError(err, 'errorSwitchVersion', {
+        data: { newVersion: hash },
+      });
+      throw err;
+    }
+    // A resolved reloadUpdate normally tears this JS context down right away.
+    // iOS has been seen resolving without restarting (89c638e); a stuck
+    // applyingUpdate would then silently swallow every later switchVersion,
+    // so release it once the process has outlived the reload and tell the
+    // logger (RESTART_FAILED: restart mechanics, not patch health).
+    armReloadWatchdog(applyingGeneration, () => {
+      this.report({
+        type: 'errorSwitchVersion',
+        code: 'RESTART_FAILED',
+        message: 'reloadUpdate resolved but the app did not restart',
+        data: { newVersion: hash },
+      });
+    });
+    return true;
+  };
+
+  switchVersionLater = async (hash: string) => {
+    if (!this.assertDebug('switchVersionLater()')) {
+      return;
+    }
+    if (assertHash(hash)) {
+      log(`switchVersionLater: ${hash}`);
+      try {
+        return await PaktaModule.setNeedUpdate({ hash });
+      } catch (e) {
+        const err = toUpdateError(e, 'SWITCH_VERSION_FAILED');
+        this.emitError(err, 'errorSwitchVersion', {
+          data: { newVersion: hash },
+        });
+        throw err;
+      }
+    }
+  };
+  checkUpdate = async (extra?: Record<string, any>) => {
+    if (!this.assertDebug('checkUpdate()')) {
+      this.notifyAfterCheckUpdate({ status: 'skipped' });
+      return;
+    }
+    if (!assertWeb()) {
+      this.notifyAfterCheckUpdate({ status: 'skipped' });
+      return;
+    }
+    if (
+      this.options.beforeCheckUpdate &&
+      (await this.options.beforeCheckUpdate()) === false
+    ) {
+      log('beforeCheckUpdate returned false, skipping check');
+      this.notifyAfterCheckUpdate({ status: 'skipped' });
+      return;
+    }
+    // 内容寻址的二进制身份,服务端据此精确判定 pdiff 适用性(取代 buildTime
+    // 启发式)。同步读 core 里已预取的值:还没算完就省略字段(服务端回退
+    // buildTime 启发式),下一次检查自然带上——绝不为它 await、拖慢或复杂化
+    // 检查流程。
+    const bundleHash = __DEV__ ? '' : getBundleHash();
+    const fetchBody = buildCheckRequestBody({
+      packageVersion: this.getEffectivePackageVersion(),
+      channel,
+      currentVersion,
+      buildTime,
+      cInfo,
+      supportedDiffVersion,
+      bundleHash,
+      isDev: __DEV__,
+      extra,
+    });
+    const stringifyBody = JSON.stringify(fetchBody);
+    // Identity of this check: only a check with the exact same request (same
+    // extra / test hash / bundleHash / binary identity) against the same
+    // endpoint set may share an in-flight or just-settled response. Two
+    // checks 2s apart with different `extra` are different questions.
+    const fingerprint = buildCheckFingerprint({
+      appKey: this.options.appKey,
+      endpoints: this.options.server?.main,
+      queryUrls: this.options.server?.queryUrls,
+      // The client uuid travels inside cInfo, i.e. inside `body`.
+      body: stringifyBody,
+    });
+    const now = Date.now();
+    if (
+      this.lastRespJson &&
+      this.lastChecking &&
+      this.lastCheckFingerprint === fingerprint &&
+      now - this.lastChecking < 1000 * 5
+    ) {
+      try {
+        const result = await this.lastRespJson;
+        this.notifyAfterCheckUpdate({ status: 'completed', result });
+        return result;
+      } catch (e: any) {
+        // The shared in-flight check failed. Its initiating call reports it
+        // through emitError/throw; this call must still honor its own
+        // contract — afterCheckUpdate always fires and throwError applies —
+        // without double-reporting the same error.
+        const err = toUpdateError(e, 'CHECK_FAILED');
+        this.notifyAfterCheckUpdate({ status: 'error', error: err });
+        this.throwIfEnabled(err);
+        return undefined;
+      }
+    }
+    this.lastChecking = now;
+    this.lastCheckFingerprint = fingerprint;
+    // harmony fetch body is not string
+    let body: any = fetchBody;
+    if (Platform.OS === 'ios' || Platform.OS === 'android') {
+      body = stringifyBody;
+    }
+    const fetchPayload = {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body,
+    };
+    let respJsonPromise: Promise<CheckResult> | undefined;
+    try {
+      this.report({
+        type: 'checking',
+        message: `${this.options.appKey}: ${stringifyBody}`,
+      });
+      // The native cold-start check may have a fresh response on disk
+      // (§10.3); reuse it instead of re-checking. The read happens INSIDE
+      // the promise so no await lands between the dedup window above and the
+      // lastRespJson assignment below (the JS2-1 double-send lesson).
+      respJsonPromise = (async (): Promise<CheckResult> => {
+        // While bundleHash prefetch is still pending, the JS request omits
+        // that key whereas the native request always includes its synchronously
+        // computed value. That narrow first-launch window intentionally misses
+        // the cache rather than delaying checkUpdate for hashing.
+        const cached = await this.readNativeCheckCache(fetchBody);
+        return cached ?? (await this.fetchCheckResult(fetchPayload));
+      })();
+      this.lastRespJson = respJsonPromise;
+      const result: CheckResult = await respJsonPromise;
+
+      log('checking result:', result);
+
+      if (result?.bundleStatus === 'unknownBundle') {
+        // 服务端判定当前二进制内嵌 bundle 未注册,增量已被降级为全量。只面向
+        // 开发者(日志 + 遥测,控制台聚合是主渠道);终端用户无感知。
+        warn(this.t('warn_unknown_bundle'));
+        this.report({
+          type: 'bundleMismatch',
+          data: bundleHash ? { bundleHash } : {},
+        });
+      }
+
+      this.notifyAfterCheckUpdate({ status: 'completed', result });
+      this.markJsCheckCompleted();
+      return result;
+    } catch (e: any) {
+      // A failed check must not keep vouching for an older response: clear
+      // the dedup slot so the next call re-asks the server — unless a newer
+      // check already owns the slot, which this failure says nothing about.
+      if (this.lastRespJson === respJsonPromise) {
+        this.lastRespJson = undefined;
+        this.lastCheckFingerprint = undefined;
+      }
+      const err = toUpdateError(e, 'CHECK_FAILED');
+      this.emitError(err, 'errorChecking', {
+        message: err.message || this.t('error_cannot_connect_server'),
+      });
+      this.notifyAfterCheckUpdate({ status: 'error', error: err });
+      this.throwIfEnabled(err);
+      // No silent fallback to a previous successful response: a stale result
+      // would let a server outage look like "still updatable" and drive the
+      // provider's auto-download off it. Return undefined so callers can
+      // distinguish "check failed" from a real empty result and keep their
+      // last good updateInfo.
+      return undefined;
+    }
+  };
+  downloadUpdate = async (
+    updateInfo: CheckResult,
+    onDownloadProgress?: (data: ProgressData) => void
+  ) => {
+    if (
+      this.options.beforeDownloadUpdate &&
+      (await this.options.beforeDownloadUpdate(updateInfo)) === false
+    ) {
+      log('beforeDownloadUpdate returned false, skipping download');
+      return;
+    }
+    const decision = decideDownload(
+      updateInfo,
+      { currentVersion, rolledBackVersion },
+      __DEV__
+    );
+    if (decision.action === 'none') {
+      if (decision.reason === 'alreadyCurrent') {
+        log(`current hash ${currentVersion}, ignored`);
+      } else if (decision.reason === 'rolledBack') {
+        log(`rolledback hash ${rolledBackVersion}, ignored`);
+      } else if (decision.reason === 'noArtifact') {
+        // A server response that advertises an update but provides no usable
+        // artifact is a bad release signal, not an ordinary no-update result.
+        // Keep the user flow silent and report at most once per bad release in
+        // this process: repeated checks must not inflate download_fail health.
+        this.reportInvalidUpdateOnce('noArtifact', updateInfo.hash || '');
+      }
+      return;
+    }
+    const { hash } = decision;
+    if (sharedState.downloadedHash === hash) {
+      log(`duplicated downloaded hash ${sharedState.downloadedHash}, ignored`);
+      return sharedState.downloadedHash;
+    }
+    // Deduplicate concurrent downloads of the same hash regardless of whether a
+    // progress callback was passed: all callers await the single in-flight
+    // promise instead of triggering parallel native downloads.
+    const existingTask = sharedState.downloadingTasks[hash];
+    if (existingTask) {
+      log(`download for hash ${hash} already in progress, reusing it`);
+      // The second caller's progress callback must still fire.
+      if (onDownloadProgress) {
+        sharedState.progressCallbacks[hash]?.add(onDownloadProgress);
+      }
+      return existingTask;
+    }
+    const task = this.performDownload(updateInfo, decision, onDownloadProgress);
+    sharedState.downloadingTasks[hash] = task;
+    try {
+      return await task;
+    } finally {
+      delete sharedState.downloadingTasks[hash];
+    }
+  };
+  /**
+   * Orders candidate mirrors for one artifact: the HEAD-race winner first
+   * (its post-redirect URL), then the remaining mirrors in configured order.
+   * Empty when there is nothing to try.
+   */
+  private rankDownloadUrls = async (urls?: string[]): Promise<string[]> => {
+    if (!urls?.length) {
+      return [];
+    }
+    const winner = await testUrls(urls);
+    const ordered: string[] = [];
+    const push = (url?: string | null) => {
+      if (url && !ordered.includes(url)) {
+        ordered.push(url);
+      }
+    };
+    push(winner);
+    for (const url of urls) {
+      push(url);
+    }
+    return ordered;
+  };
+  private performDownload = async (
+    updateInfo: CheckResult,
+    plan: DownloadPlan,
+    onDownloadProgress?: (data: ProgressData) => void
+  ) => {
+    const { name, description = '', metaInfo } = updateInfo;
+    const { hash, attempts, devNoop } = plan;
+    if (devNoop) {
+      // Dev without a full package URL: nothing can be fetched, let alone
+      // installed. Say so and deliver nothing — faking a success here used to
+      // hand the caller a hash whose switchVersion the native side (rightly)
+      // rejects with SWITCH_VERSION_FAILED.
+      log(this.t('dev_incremental_update_disabled'));
+      return;
+    }
+    const patchStartTime = Date.now();
+    // One native listener per hash dispatching to a callback set, so
+    // concurrent callers deduped onto this task can each observe progress
+    // (they register via downloadUpdate).
+    const progressCallbacks = new Set<(data: ProgressData) => void>();
+    if (onDownloadProgress) {
+      progressCallbacks.add(onDownloadProgress);
+    }
+    sharedState.progressCallbacks[hash] = progressCallbacks;
+    const dispatchProgress = (data: ProgressData) => {
+      const callbacks = sharedState.progressCallbacks[hash];
+      if (!callbacks || callbacks.size === 0) {
+        return;
+      }
+      const payload = {
+        ...data,
+        progress: computeProgress(data.received, data.total),
+      };
+      callbacks.forEach((callback) => {
+        // One subscriber throwing must not starve the others or abort the
+        // download: business callbacks are isolated, the error is logged.
+        try {
+          callback(payload);
+        } catch (e) {
+          warn('onDownloadProgress callback threw', e);
+        }
+      });
+    };
+    // RN >= 0.87 types native event listeners as `(...args: readonly Object[])`,
+    // which a `(data: ProgressData) => void` callback is not assignable to. Take
+    // the raw event and narrow it here so this compiles on every RN version.
+    const onNativeProgress = (event: unknown) => {
+      const progressData = event as ProgressData;
+      if (progressData.hash === hash) {
+        dispatchProgress(progressData);
+      }
+    };
+    // @ts-expect-error harmony not in existing platforms
+    if (Platform.OS === 'harmony') {
+      sharedState.progressHandlers[hash] = DeviceEventEmitter.addListener(
+        'RCTPaktaDownloadProgress',
+        onNativeProgress
+      );
+    } else {
+      sharedState.progressHandlers[hash] = paktaNativeEventEmitter.addListener(
+        'RCTPaktaDownloadProgress',
+        onNativeProgress
+      );
+    }
+    const maxRetries = Math.max(0, Math.floor(this.options.maxRetries ?? 3));
+    let succeeded = '';
+    let lastError: UpdateError | undefined;
+    const errorMessages: string[] = [];
+    // A strategy whose bytes arrived but could not be applied fails the same
+    // way on every retry (same artifact, same base): remember it — with its
+    // message, so the final report still names it — and skip it on later
+    // attempts instead of downloading and patching it again.
+    const exhaustedStrategies = new Map<DownloadStrategyType, string>();
+    // Whether any strategy, in any attempt, failed at the patch stage. The
+    // downloadFallback report carries that as its code even when a later,
+    // unrelated transport failure happened to be the last error seen.
+    let patchFailed = false;
+
+    // The ordered attempts come from decideDownload (the pure decision layer);
+    // this side only executes them: probe candidate URLs, run the matching
+    // native download, fall through to the next attempt on failure.
+    const runners: Record<
+      DownloadStrategyType,
+      (url: string) => Promise<void>
+    > = {
+      diff: (url) =>
+        PaktaModule.downloadPatchFromPpk({
+          updateUrl: url,
+          hash,
+          originHash: currentVersion,
+        }),
+      pdiff: (url) =>
+        PaktaModule.downloadPatchFromPackage({
+          updateUrl: url,
+          hash,
+        }),
+      full: (url) =>
+        PaktaModule.downloadFullUpdate({
+          updateUrl: url,
+          hash,
+        }),
+    };
+    const errorKeys = {
+      diff: 'error_diff_failed',
+      pdiff: 'error_pdiff_failed',
+      full: 'error_full_patch_failed',
+    } as const;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        // Exponential backoff with jitter: a bad CDN edge otherwise gets
+        // every client back at the same 1/2/4s marks.
+        const backoffMs = Math.round(
+          Math.min(1000 * 2 ** (attempt - 1), 10000) *
+            (0.75 + Math.random() * 0.5)
+        );
+        log(`retry attempt ${attempt}/${maxRetries}, waiting ${backoffMs}ms`);
+        await new Promise((r) => setTimeout(r, backoffMs));
+        errorMessages.length = 0;
+        errorMessages.push(...exhaustedStrategies.values());
+        lastError = undefined;
+        succeeded = '';
+      }
+      this.report({
+        type: 'downloading',
+        data: {
+          newVersion: hash,
+          attempt,
+        },
+      });
+      for (const { type, urls } of attempts) {
+        if (succeeded) {
+          break;
+        }
+        if (exhaustedStrategies.has(type)) {
+          continue;
+        }
+        // The HEAD race only ranks mirrors; it is not proof that a mirror can
+        // serve the whole artifact (CDNs answer HEAD and GET differently, and
+        // a transfer can die mid-stream). Every mirror of the same artifact
+        // gets a real download attempt before the strategy is abandoned —
+        // the native cold-start path already behaves this way.
+        const orderedUrls = await this.rankDownloadUrls(urls);
+        for (const url of orderedUrls) {
+          log(`downloading ${type} from ${url}`);
+          try {
+            await runners[type](url);
+            succeeded = type;
+            break;
+          } catch (e: unknown) {
+            // The native rejection's stable code (e.g. PATCH_FAILED vs
+            // DOWNLOAD_FAILED — telemetry classifies on it) may sit on the
+            // `code` property or, from bridges that cannot set it, as a
+            // `[CODE] ` message prefix. Either way it survives into the
+            // i18n-wrapped error together with the original as cause.
+            const { code, message } = readErrorCode(e);
+            const errorMessage = this.t(errorKeys[type], {
+              message: message || String(e ?? ''),
+            });
+            errorMessages.push(errorMessage);
+            lastError = new UpdateError(
+              errorMessage,
+              code ?? 'DOWNLOAD_FAILED',
+              {
+                cause: e,
+              }
+            );
+            log(errorMessage);
+            if (lastError.code === 'PATCH_FAILED') {
+              patchFailed = true;
+            }
+            if (!isMirrorRetryableCode(lastError.code)) {
+              // The bytes arrived but could not be applied (patch/manifest
+              // mismatch): every mirror serves the same artifact, so move
+              // on to the next strategy instead of re-downloading it.
+              exhaustedStrategies.set(type, errorMessage);
+              break;
+            }
+          }
+        }
+      }
+      if (
+        succeeded ||
+        attempts.every(({ type }) => exhaustedStrategies.has(type))
+      ) {
+        // Nothing left that a retry could change.
+        break;
+      }
+    }
+    if (sharedState.progressHandlers[hash]) {
+      sharedState.progressHandlers[hash].remove();
+      delete sharedState.progressHandlers[hash];
+    }
+    delete sharedState.progressCallbacks[hash];
+    if (succeeded && errorMessages.length > 0) {
+      // An earlier strategy failed and a later one rescued the download
+      // (e.g. pdiff copiesCrc mismatch on a rebuilt binary → full). Surface
+      // the degradation: it is invisible to the end user but tells the
+      // platform that incremental delivery is failing for this binary.
+      this.report({
+        type: 'downloadFallback',
+        // The patch-health signal wins over whatever transport failure
+        // happened to come last (diff PATCH_FAILED, then pdiff network
+        // error, then full succeeded is still a patch_fail server-side).
+        code: patchFailed ? 'PATCH_FAILED' : lastError?.code,
+        data: {
+          newVersion: hash,
+          succeeded,
+        },
+        message: errorMessages.join(';'),
+      });
+    }
+    if (!succeeded) {
+      const message = errorMessages.join(';');
+      if (lastError) {
+        const err = toUpdateError(lastError, 'DOWNLOAD_FAILED');
+        this.emitError(err, 'errorUpdate', {
+          message,
+          data: { newVersion: hash },
+        });
+        throw err;
+      }
+      // No download URL was even attempted (e.g. dev without a full URL):
+      // report for diagnostics but there is no error object to surface.
+      this.report({
+        type: 'errorUpdate',
+        data: { newVersion: hash },
+        message,
+      });
+      return;
+    } else {
+      const duration = Date.now() - patchStartTime;
+      const data: Record<string, any> = {
+        newVersion: hash,
+        diff: succeeded,
+        duration,
+      };
+      if (errorMessages.length > 0) {
+        data.error = errorMessages.join(';');
+      }
+      // silentAndNow 紧接着重启 JS 运行时。这里等待有超时且失败已吞掉的
+      // 回执，避免下载成功记录在重启时被截断，同时不让遥测阻塞更新。
+      await this.report({
+        type: 'downloadSuccess',
+        data,
+      });
+    }
+    log(`downloaded ${succeeded} hash:`, hash);
+    const hashInfo: Record<string, any> = {
+      name,
+      description,
+      metaInfo,
+    };
+    if (sharedState.toHash === hash) {
+      hashInfo.debugChannel = true;
+    }
+    // The version is "downloaded" only once its metadata is persisted: a
+    // lost hash-info write would leave the next launch with a nameless
+    // version and a switchVersion that the native side may refuse.
+    try {
+      await setLocalHashInfo(hash, hashInfo);
+    } catch (e: any) {
+      const err = toUpdateError(e, 'FILE_OPERATION_FAILED');
+      this.emitError(err, 'errorUpdate', {
+        message: err.message,
+        data: { newVersion: hash },
+      });
+      throw err;
+    }
+    sharedState.downloadedHash = hash;
+    return hash;
+  };
+  downloadAndInstallApk = async (
+    url: string,
+    onDownloadProgress?: (data: ProgressData) => void
+  ) => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+    if (sharedState.apkStatus === 'downloading') {
+      return;
+    }
+    if (sharedState.apkStatus === 'downloaded') {
+      const err = new UpdateError(
+        this.t('error_apk_pending_install'),
+        'APK_INSTALL_PENDING'
+      );
+      this.emitError(err, 'errorInstallApk');
+      this.throwIfEnabled(err);
+      return;
+    }
+    sharedState.apkStatus = 'downloading';
+    this.report({ type: 'downloadingApk' });
+    const progressKey = 'downloadingApk';
+    if (onDownloadProgress) {
+      if (sharedState.progressHandlers[progressKey]) {
+        sharedState.progressHandlers[progressKey].remove();
+      }
+      sharedState.progressHandlers[progressKey] =
+        paktaNativeEventEmitter.addListener(
+          'RCTPaktaDownloadProgress',
+          (event: unknown) => {
+            const progressData = event as ProgressData;
+            if (progressData.hash === progressKey) {
+              onDownloadProgress(progressData);
+            }
+          }
+        );
+    }
+    try {
+      await PaktaModule.downloadAndInstallApk({
+        url,
+        target: 'update.apk',
+        hash: progressKey,
+      });
+      sharedState.apkStatus = 'downloaded';
+    } catch (e) {
+      sharedState.apkStatus = null;
+      // Keep the native error (message/stack) instead of discarding it.
+      const err = toUpdateError(e, 'APK_DOWNLOAD_FAILED');
+      this.emitError(err, 'errorDownloadAndInstallApk', {
+        message: err.message || this.t('error_apk_download_failed'),
+      });
+      this.throwIfEnabled(err);
+    } finally {
+      if (sharedState.progressHandlers[progressKey]) {
+        sharedState.progressHandlers[progressKey].remove();
+        delete sharedState.progressHandlers[progressKey];
+      }
+    }
+  };
+  restartApp = async () => {
+    try {
+      if (!(await this.runBeforeReload({ type: 'restartApp' }))) {
+        return;
+      }
+    } catch (e) {
+      const err = toUpdateError(e, 'USER_HOOK_ERROR');
+      this.emitError(err, 'errorRestart');
+      throw err;
+    }
+    try {
+      return await PaktaModule.restartApp();
+    } catch (e) {
+      const err = toUpdateError(e, 'RESTART_FAILED');
+      this.emitError(err, 'errorRestart');
+      throw err;
+    }
+  };
+  /**
+   * Reset to the bundle packaged in the binary: wipes every downloaded update
+   * and the whole update state on the native side, so the app loads the
+   * built-in bundle on the next launch (or immediately with
+   * `{ restart: true }`). The client uuid is preserved.
+   *
+   * Returns whether the reset actually happened. Like the other update-flow
+   * APIs it never throws by default — failures land in lastError/onError with
+   * code RESET_FAILED — but the boolean must not be ignored: a false means the
+   * app is still running the hot-updated bundle. Set `throwError` to throw.
+   */
+  resetToPackagedBundle = async (options?: {
+    restart?: boolean;
+  }): Promise<boolean> => {
+    if (!assertWeb()) {
+      // On web PaktaModule is a Proxy of noops, so the feature-detect below
+      // would report a false success.
+      return false;
+    }
+    if (typeof PaktaModule.resetToPackagedBundle !== 'function') {
+      // The JS layer can arrive via hot update onto an older binary whose
+      // native module predates this method.
+      const err = new UpdateError(
+        this.t('error_reset_not_supported'),
+        'RESET_FAILED'
+      );
+      this.emitError(err, 'errorReset');
+      this.throwIfEnabled(err);
+      return false;
+    }
+    try {
+      await PaktaModule.resetToPackagedBundle();
+    } catch (e) {
+      const err = toUpdateError(e, 'RESET_FAILED');
+      this.emitError(err, 'errorReset');
+      this.throwIfEnabled(err);
+      return false;
+    }
+    // The downloaded versions are gone; drop JS bookkeeping referring to them
+    // so a stale downloadedHash cannot be switched to.
+    sharedState.downloadedHash = undefined;
+    sharedState.toHash = undefined;
+    sharedState.marked = false;
+    // Invalidate the private owner too: old promises/timers must not touch
+    // a switch that starts after this reset.
+    invalidateApplyingUpdate();
+    sharedState.apkStatus = null;
+    this.report({ type: 'reset' });
+    if (options?.restart) {
+      try {
+        await this.restartApp();
+      } catch (e: any) {
+        // The reset itself succeeded and the restart failure was already
+        // reported through the pipeline; the boolean must still say "state
+        // is reset".
+        log('restart after reset failed:', e?.message || e);
+      }
+    }
+    return true;
+  };
+}

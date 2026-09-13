@@ -1,0 +1,27 @@
+/**
+ * [INPUT]: 依赖 Android Gradle Plugin、React Native 与仓库级版本属性
+ * [OUTPUT]: 对外提供 e2etest Android 根项目插件和仓库配置
+ * [POS]: Android 宿主构建根，不承载应用业务代码
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+buildscript {
+    ext {
+        buildToolsVersion = "36.0.0"
+        minSdkVersion = 24
+        compileSdkVersion = 36
+        targetSdkVersion = 36
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "2.1.20"
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"

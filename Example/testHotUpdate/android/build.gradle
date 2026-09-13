@@ -1,0 +1,27 @@
+/*
+ * [INPUT]: Android Gradle Plugin、React Native Gradle Plugin 与本地 SDK/NDK 版本。
+ * [OUTPUT]: 提供所有子模块共享的构建版本、仓库和 classpath。
+ * [POS]: testHotUpdate Android 根构建入口，不承载 app 业务逻辑。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+buildscript {
+    ext {
+        buildToolsVersion = "37.0.0"
+        minSdkVersion = 24
+        compileSdkVersion = 37
+        targetSdkVersion = 36
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "2.2.0"
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"

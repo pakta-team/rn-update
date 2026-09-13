@@ -1,0 +1,117 @@
+/**
+ * [INPUT]: 依赖 ../telemetry 的 MAX_DETAIL_LENGTH、事件类型映射、目标 hash 解析和详情截断函数，使用生命周期事件与原生错误码样本
+ * [OUTPUT]: 提供本地事件到服务端 aggregate type/hash/detail 的纯函数契约，锁定 patch_fail 过滤与长度上限
+ * [POS]: __tests__ 的遥测语义单测，与 clientTelemetry.test.ts 的下载降级集成回归组成两层验证
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+import { describe, expect, test } from 'bun:test';
+import {
+  MAX_DETAIL_LENGTH,
+  resolveServerEventHash,
+  resolveServerEventType,
+  truncateDetail,
+} from '../telemetry';
+
+describe('resolveServerEventType', () => {
+  test('maps lifecycle events to server aggregate types', () => {
+    expect(resolveServerEventType('downloadSuccess')).toBe('download_success');
+    expect(resolveServerEventType('markSuccess')).toBe('mark_success');
+    expect(resolveServerEventType('rollback')).toBe('rollback');
+    expect(resolveServerEventType('errorSwitchVersion')).toBe('patch_fail');
+    expect(
+      resolveServerEventType('errorSwitchVersion', 'SWITCH_VERSION_FAILED')
+    ).toBe('patch_fail');
+  });
+
+  test('errorSwitchVersion excludes user-hook and restart failures (JS2-3)', () => {
+    // A user beforeReload hook throwing, or a restart-mechanics failure, is
+    // not a patch-quality signal and must stay out of the server-side stats
+    // that drive the rollback safety net.
+    expect(
+      resolveServerEventType('errorSwitchVersion', 'USER_HOOK_ERROR')
+    ).toBeUndefined();
+    expect(
+      resolveServerEventType('errorSwitchVersion', 'RESTART_FAILED')
+    ).toBeUndefined();
+  });
+
+  test('splits errorUpdate by underlying native code', () => {
+    expect(resolveServerEventType('errorUpdate', 'DOWNLOAD_FAILED')).toBe(
+      'download_fail'
+    );
+    expect(resolveServerEventType('errorUpdate')).toBe('download_fail');
+    expect(resolveServerEventType('errorUpdate', 'PATCH_FAILED')).toBe(
+      'patch_fail'
+    );
+  });
+
+  test('returns undefined for local-only events', () => {
+    expect(resolveServerEventType('checking')).toBeUndefined();
+    expect(resolveServerEventType('downloading')).toBeUndefined();
+    expect(resolveServerEventType('errorChecking')).toBeUndefined();
+    expect(resolveServerEventType('errorMarkSuccess')).toBeUndefined();
+    expect(resolveServerEventType('downloadingApk')).toBeUndefined();
+  });
+
+  test('downloadFallback reports only patch-apply failures as patch_fail', () => {
+    // pdiff failed to apply (e.g. copiesCrc mismatch on a rebuilt binary) and
+    // full rescued the download: patch-health signal.
+    expect(resolveServerEventType('downloadFallback', 'PATCH_FAILED')).toBe(
+      'patch_fail'
+    );
+    // Plain download errors that a later strategy rescued are network noise —
+    // local-only.
+    expect(
+      resolveServerEventType('downloadFallback', 'DOWNLOAD_FAILED')
+    ).toBeUndefined();
+    expect(resolveServerEventType('downloadFallback')).toBeUndefined();
+  });
+});
+
+describe('resolveServerEventHash', () => {
+  test('rollback uses the rolled back version', () => {
+    expect(
+      resolveServerEventHash({
+        serverType: 'rollback',
+        data: { rolledBackVersion: 'abc' },
+        currentVersion: 'cur',
+      })
+    ).toBe('abc');
+  });
+
+  test('mark_success falls back to the running version', () => {
+    expect(
+      resolveServerEventHash({
+        serverType: 'mark_success',
+        data: {},
+        currentVersion: 'cur',
+      })
+    ).toBe('cur');
+  });
+
+  test('download events require the target hash', () => {
+    expect(
+      resolveServerEventHash({
+        serverType: 'download_fail',
+        data: { newVersion: 'xyz' },
+        currentVersion: 'cur',
+      })
+    ).toBe('xyz');
+    expect(
+      resolveServerEventHash({
+        serverType: 'download_fail',
+        data: {},
+        currentVersion: 'cur',
+      })
+    ).toBe('');
+  });
+});
+
+describe('truncateDetail', () => {
+  test('caps detail under the server column limit', () => {
+    expect(truncateDetail('x'.repeat(2000))?.length).toBe(MAX_DETAIL_LENGTH);
+    expect(truncateDetail('short')).toBe('short');
+    expect(truncateDetail('')).toBeUndefined();
+    expect(truncateDetail(undefined)).toBeUndefined();
+  });
+});

@@ -1,0 +1,93 @@
+# [INPUT]: 依赖仓库 cpp/patch_core、cpp/update_flow_core、android/jni 适配、RNOH/ACE NAPI 与可选 staged native 源
+# [OUTPUT]: 构建 rnupdate 共享库及可选 rnoh_pakta TurboModule 库，统一 C++17、头路径、第三方解码器与 Release 裁剪
+# [POS]: Harmony 原生交付入口，负责链接拓扑而不重写共享补丁/状态/更新流算法
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
+cmake_minimum_required(VERSION 3.13)
+project(rnupdate LANGUAGES C CXX)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(CMAKE_VERBOSE_MAKEFILE on)
+
+set(REPO_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../)
+set(STAGED_NATIVE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/android-generated)
+set(ANDROID_JNI_DIR ${REPO_ROOT}/android/jni)
+if(NOT EXISTS ${ANDROID_JNI_DIR}/hpatch.c)
+    set(ANDROID_JNI_DIR ${STAGED_NATIVE_DIR}/jni)
+endif()
+set(PATCH_CORE_DIR ${REPO_ROOT}/cpp/patch_core)
+if(NOT EXISTS ${PATCH_CORE_DIR}/patch_core.cpp)
+    set(PATCH_CORE_DIR ${STAGED_NATIVE_DIR}/patch_core)
+endif()
+set(UPDATE_FLOW_CORE_DIR ${REPO_ROOT}/cpp/update_flow_core)
+if(NOT EXISTS ${UPDATE_FLOW_CORE_DIR}/update_flow_core.cpp)
+    set(UPDATE_FLOW_CORE_DIR ${STAGED_NATIVE_DIR}/update_flow_core)
+endif()
+
+# Always compile from source. A prebuilt-import branch used to live here, but
+# it had no symbol verification: a stale libs/<abi>/librnupdate.so missing a
+# newly added export (e.g. getSupportedDiffVersion) would silently ship and
+# crash getConstants at runtime.
+set(HDIFFPATCH_DIR ${ANDROID_JNI_DIR}/HDiffPatch)
+set(LZMA_DIR ${ANDROID_JNI_DIR}/lzma)
+set(HDP_SOURCES
+     ${CMAKE_CURRENT_SOURCE_DIR}/pakta.cpp
+     ${PATCH_CORE_DIR}/archive_patch_core.cpp
+     ${PATCH_CORE_DIR}/digest.cpp
+     ${PATCH_CORE_DIR}/hbc_transform.cpp
+     ${PATCH_CORE_DIR}/hbc_transform_wire.cpp
+     ${PATCH_CORE_DIR}/patch_core.cpp
+     ${PATCH_CORE_DIR}/state_core.cpp
+     ${UPDATE_FLOW_CORE_DIR}/flow_json.cpp
+     ${UPDATE_FLOW_CORE_DIR}/update_flow_core.cpp
+     ${ANDROID_JNI_DIR}/hpatch.c
+     ${HDIFFPATCH_DIR}/libHDiffPatch/HPatch/patch.c
+     ${HDIFFPATCH_DIR}/file_for_patch.c
+     ${LZMA_DIR}/C/LzmaDec.c
+     ${LZMA_DIR}/C/Lzma2Dec.c
+)
+
+add_library(rnupdate SHARED
+    ${HDP_SOURCES}
+)
+
+target_include_directories(rnupdate PRIVATE
+     ${CMAKE_CURRENT_SOURCE_DIR}
+     ${PATCH_CORE_DIR}
+     ${UPDATE_FLOW_CORE_DIR}
+     ${ANDROID_JNI_DIR}
+     ${HDIFFPATCH_DIR}
+     ${HDIFFPATCH_DIR}/libHDiffPatch/HPatch
+     ${LZMA_DIR}/C
+)
+
+target_link_libraries(rnupdate PUBLIC
+    libace_napi.z.so
+)
+
+if(TARGET rnoh)
+    add_library(rnoh_pakta SHARED
+        ${CMAKE_CURRENT_SOURCE_DIR}/PaktaTurboModule.cpp
+    )
+    target_include_directories(rnoh_pakta PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(rnoh_pakta PUBLIC rnoh)
+endif()
+
+# Optimize binary size for Release builds of the NAPI library. --gc-sections
+# only drops anything when every function/data item sits in its own section,
+# and the module registers itself through NAPI_MODULE's static constructor,
+# so no symbol needs default visibility. Scoped to rnupdate: rnoh_pakta must
+# keep exporting PaktaTurboModule (JSI_EXPORT) for the host's PackageProvider.
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(rnupdate PRIVATE
+        -ffunction-sections
+        -fdata-sections
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden
+    )
+    # Strip debug symbols and garbage-collect the unused sections.
+    target_link_options(rnupdate PRIVATE -Wl,--gc-sections -s)
+endif()

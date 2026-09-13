@@ -1,0 +1,26 @@
+/**
+ * [INPUT]: 依赖 ArkTS/TypeScript lint 规则集与工程目录匹配语法
+ * [OUTPUT]: 提供 HarmonyOS 源码检查范围、忽略目录和规则集合
+ * [POS]: harmony_use_pakta 静态质量门禁配置，独立于运行时构建产物
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+{
+  "files": [
+    "**/*.ets"
+  ],
+  "ignore": [
+    "**/src/ohosTest/**/*",
+    "**/src/test/**/*",
+    "**/src/mock/**/*",
+    "**/node_modules/**/*",
+    "**/oh_modules/**/*",
+    "**/build/**/*",
+    "**/.preview/**/*"
+  ],
+  "ruleSet": [
+    "plugin:@performance/recommended",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "rules": {
+  }
+}

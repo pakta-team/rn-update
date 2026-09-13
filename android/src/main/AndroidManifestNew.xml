@@ -1,0 +1,14 @@
+<!--
+  [INPUT]: 依赖 AGP namespace、pakta_build_time 字符串资源与 pakta_file_paths 路径资源
+  [OUTPUT]: 对外注册构建身份元数据和非导出、临时授权的 PaktaFileProvider
+  [POS]: main 新版 Manifest 合并入口，供支持 namespace 的 AGP 替换旧 package Manifest
+  [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <meta-data android:name="pakta_build_time" android:value="@string/pakta_build_time" />
+        <receiver
+            android:name="cn.reactnative.modules.update.PackageInstallerStatusReceiver"
+            android:exported="false" />
+    </application>
+</manifest>

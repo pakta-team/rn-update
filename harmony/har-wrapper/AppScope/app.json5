@@ -1,0 +1,12 @@
+// [INPUT]: 依赖 HAR 包装发布者提供的 bundleName、vendor 与版本元数据
+// [OUTPUT]: 声明 Harmony 应用身份，供 har-wrapper 产品配置和根 Hvigor 插件读取
+// [POS]: 应用包装配置边界，不承载 pakta 更新运行时或 native 能力
+// [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+{
+  "app": {
+    "bundleName": "com.reactnativecn.pakta.har",
+    "vendor": "reactnativecn",
+    "versionCode": 1,
+    "versionName": "1.0.0"
+  }
+}

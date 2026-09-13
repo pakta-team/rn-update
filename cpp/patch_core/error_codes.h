@@ -1,0 +1,58 @@
+/**
+ * [INPUT]: 依赖 JS UpdateErrorCode 与 Android Java 常量共同遵守的跨平台错误语义
+ * [OUTPUT]: 对外提供稳定、机器可读的原生更新错误码常量
+ * [POS]: patch_core 的错误协议事实源，供 iOS 直接引用并约束无法包含本头的镜像实现
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+#ifndef PAKTA_PATCH_CORE_ERROR_CODES_H_
+#define PAKTA_PATCH_CORE_ERROR_CODES_H_
+
+// Single source of truth for the stable, machine-readable error codes shared
+// by every platform. Native modules reject promises with one of these codes
+// so the JS layer (src/error.ts UpdateErrorCode) and user loggers can
+// aggregate errors across platforms and locales.
+//
+// Mirrors that cannot include this header MUST stay in sync by hand:
+//   - src/error.ts                      (UpdateErrorCode union, JS layer)
+//   - android/.../ErrorCodes.java      (Java constants)
+// iOS (RCTPakta.mm) includes this header directly.
+//
+// Human-readable messages are NOT part of this contract: they may differ per
+// platform and locale. Only the codes are stable.
+
+namespace pakta {
+namespace error_codes {
+
+// Method options missing or malformed (blank hash/url, wrong types).
+constexpr const char* kInvalidOptions = "INVALID_OPTIONS";
+// Native download failed (network error, bad HTTP status, truncated body).
+constexpr const char* kDownloadFailed = "DOWNLOAD_FAILED";
+// Unzip or hdiff patch application failed.
+constexpr const char* kPatchFailed = "PATCH_FAILED";
+// Local file or state persistence operation failed.
+constexpr const char* kFileOperationFailed = "FILE_OPERATION_FAILED";
+// switchVersion / setNeedUpdate state transition failed.
+constexpr const char* kSwitchVersionFailed = "SWITCH_VERSION_FAILED";
+// markSuccess state transition failed.
+constexpr const char* kMarkSuccessFailed = "MARK_SUCCESS_FAILED";
+// reloadUpdate / restartApp failed.
+constexpr const char* kRestartFailed = "RESTART_FAILED";
+// resetToPackagedBundle failed (state wipe or cleanup could not run), or the
+// installed native module predates the method (JS-layer detection).
+constexpr const char* kResetFailed = "RESET_FAILED";
+// Stored or provided hash info is not a valid JSON object.
+constexpr const char* kInvalidHashInfo = "INVALID_HASH_INFO";
+// The method is not supported on this platform (e.g. downloadAndInstallApk
+// outside Android).
+constexpr const char* kUnsupportedPlatform = "UNSUPPORTED_PLATFORM";
+// Android full-package installation requires the user to trust the app as an
+// install source before PackageInstaller can accept a session.
+constexpr const char* kApkInstallPermissionRequired =
+    "APK_INSTALL_PERMISSION_REQUIRED";
+// PackageInstaller could not create, write, commit, or continue an APK session.
+constexpr const char* kApkInstallFailed = "APK_INSTALL_FAILED";
+
+}  // namespace error_codes
+}  // namespace pakta
+
+#endif  // PAKTA_PATCH_CORE_ERROR_CODES_H_

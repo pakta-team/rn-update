@@ -1,0 +1,18 @@
+/**
+ * [INPUT]: 依赖 OpenHarmony 包管理器、RNOH 0.72.96 与仓库内 Pakta HAR 产物
+ * [OUTPUT]: 声明 entry 包元数据及其运行时依赖图
+ * [POS]: entry 模块包清单，供 ohpm/Hvigor 解析 JavaScript/ArkTS 依赖
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+{
+  name: 'entry',
+  version: '1.0.0',
+  description: 'Please describe the basic information.',
+  main: '',
+  author: '',
+  license: '',
+  dependencies: {
+    '@rnoh/react-native-openharmony': '0.72.96',
+    pakta: 'file:../../../../harmony/pakta.har',
+  },
+}

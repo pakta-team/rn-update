@@ -1,0 +1,8 @@
+/**
+ * [INPUT]: 依赖 HarmonyOS 预览器 mock 配置约定
+ * [OUTPUT]: 提供 mock 运行时配置容器，当前保持默认空配置
+ * [POS]: entry 开发预览辅助配置，不参与生产 HAP 业务逻辑
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+{
+}

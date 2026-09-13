@@ -1,0 +1,15 @@
+// [INPUT]: 依赖 Harmony module schema 与 HAR 设备类型约定
+// [OUTPUT]: 声明 pakta 模块名称、HAR 类型和 default 设备范围
+// [POS]: main 源集装载 Manifest，连接构建产物与 ArkTS/RNOH 运行时发现
+// [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+{
+  // The HAR declares no permissions itself: the network is used by the host
+  // app's process, so the CONSUMER must request ohos.permission.INTERNET in
+  // its entry module.json5 (and should keep cleartextTrafficPermitted:false
+  // in network_config.json). See harmony/pakta/src/README.md.
+  "module": {
+    "name": "pakta",
+    "type": "har",
+    "deviceTypes": ['default'],
+  },
+}

@@ -1,0 +1,169 @@
+/**
+ * [INPUT]: 依赖共享原生错误码约定与 JavaScript Error/cause 语义，不依赖 UI 或网络实现
+ * [OUTPUT]: 对外提供 UpdateErrorCode、asUpdateErrorCode、UpdateError 与 toUpdateError 归一化入口
+ * [POS]: src 的跨层错误语义边界，把平台异常转换为可稳定聚合、上报和分支处理的机器码
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+/**
+ * Stable, machine-readable error codes. Unlike messages (which are localized
+ * and vary across platforms), codes are safe to aggregate on in a logger.
+ *
+ * The native-originated codes (second group) are defined in
+ * cpp/patch_core/error_codes.h — the single source of truth shared by the
+ * Android/iOS/Harmony modules — and flow through promise rejections onto the
+ * `code` property, which toUpdateError() preserves.
+ */
+export type UpdateErrorCode =
+  // JS-layer codes
+  | 'MODULE_NOT_LOADED'
+  | 'APPKEY_REQUIRED'
+  | 'NO_ENDPOINTS'
+  | 'HTTP_STATUS'
+  // A 2xx check response that is not a check verdict (schema gate).
+  | 'INVALID_RESPONSE'
+  | 'CHECK_FAILED'
+  | 'DOWNLOAD_FAILED'
+  | 'SWITCH_VERSION_FAILED'
+  | 'MARK_SUCCESS_FAILED'
+  | 'APK_INSTALL_PENDING'
+  | 'APK_DOWNLOAD_FAILED'
+  // A throw from a user-provided hook (e.g. beforeReload) — not an update
+  // pipeline failure, and excluded from server-side patch-health telemetry.
+  | 'USER_HOOK_ERROR'
+  // A second client/provider in the same process — a hard integration error;
+  // the SDK is a process-level singleton.
+  | 'SINGLETON_VIOLATION'
+  // Native codes (see cpp/patch_core/error_codes.h)
+  | 'INVALID_OPTIONS'
+  | 'PATCH_FAILED'
+  | 'FILE_OPERATION_FAILED'
+  | 'RESTART_FAILED'
+  | 'RESET_FAILED'
+  | 'INVALID_HASH_INFO'
+  | 'UNSUPPORTED_PLATFORM'
+  | 'APK_INSTALL_PERMISSION_REQUIRED'
+  | 'APK_INSTALL_FAILED';
+
+const KNOWN_CODES = new Set<string>([
+  'MODULE_NOT_LOADED',
+  'APPKEY_REQUIRED',
+  'NO_ENDPOINTS',
+  'HTTP_STATUS',
+  'INVALID_RESPONSE',
+  'CHECK_FAILED',
+  'DOWNLOAD_FAILED',
+  'SWITCH_VERSION_FAILED',
+  'MARK_SUCCESS_FAILED',
+  'APK_INSTALL_PENDING',
+  'APK_DOWNLOAD_FAILED',
+  'USER_HOOK_ERROR',
+  'SINGLETON_VIOLATION',
+  'INVALID_OPTIONS',
+  'PATCH_FAILED',
+  'FILE_OPERATION_FAILED',
+  'RESTART_FAILED',
+  'RESET_FAILED',
+  'INVALID_HASH_INFO',
+  'UNSUPPORTED_PLATFORM',
+  'APK_INSTALL_PERMISSION_REQUIRED',
+  'APK_INSTALL_FAILED',
+]);
+
+/**
+ * Narrow an arbitrary `code` property (axios' ERR_NETWORK, Node's
+ * ECONNREFUSED, RN's default EUNSPECIFIED, ...) to our stable set; anything
+ * else is treated as absent so it never leaks into telemetry aggregation.
+ */
+export const asUpdateErrorCode = (
+  code: unknown
+): UpdateErrorCode | undefined =>
+  typeof code === 'string' && KNOWN_CODES.has(code)
+    ? (code as UpdateErrorCode)
+    : undefined;
+
+// A bridge that cannot put the code on the rejection's `code` property
+// (Harmony's TurboModule rejections carry only a message) prefixes the
+// message with it instead: `[PATCH_FAILED] copiesCrc mismatch`.
+const CODED_MESSAGE = /^\[([A-Z_]+)\] /;
+
+/**
+ * The stable code a thrown value carries, if any, and its message with the
+ * `[CODE] ` prefix (see CODED_MESSAGE) stripped. A `code` property wins over
+ * the prefix; an unknown code in either place counts as absent.
+ */
+export const readErrorCode = (
+  e: unknown
+): { code?: UpdateErrorCode; message: string } => {
+  const source =
+    e !== null && typeof e === 'object'
+      ? (e as { code?: unknown; message?: unknown })
+      : undefined;
+  const raw =
+    typeof e === 'string'
+      ? e
+      : typeof source?.message === 'string'
+        ? source.message
+        : '';
+  const match = CODED_MESSAGE.exec(raw);
+  const prefixed = match ? asUpdateErrorCode(match[1]) : undefined;
+  return {
+    code: asUpdateErrorCode(source?.code) ?? prefixed,
+    message: prefixed && match ? raw.slice(match[0].length) : raw,
+  };
+};
+
+export class UpdateError extends Error {
+  code: UpdateErrorCode;
+  cause?: unknown;
+  extra?: Record<string, string | number>;
+
+  constructor(
+    message: string,
+    code: UpdateErrorCode,
+    options?: { cause?: unknown; extra?: Record<string, string | number> }
+  ) {
+    super(message);
+    this.name = 'UpdateError';
+    this.code = code;
+    this.cause = options?.cause;
+    this.extra = options?.extra;
+  }
+}
+
+/**
+ * Attach a code to an unknown thrown value. An existing Error keeps its
+ * identity (message, stack, and any known code already assigned upstream) so
+ * callers comparing the caught error to the original still match; non-Error
+ * values are wrapped. A code carried as a `[CODE] ` message prefix is moved
+ * onto the `code` property (and off the message) exactly as if the bridge
+ * had set it. A foreign `code` (axios/system errors) is overwritten with
+ * ours; a frozen/sealed Error that rejects the assignment is wrapped instead
+ * (identity is lost only in that edge case).
+ */
+export const toUpdateError = (
+  e: unknown,
+  code: UpdateErrorCode
+): UpdateError => {
+  if (e instanceof Error) {
+    const err = e as UpdateError;
+    if (!asUpdateErrorCode(err.code)) {
+      const parsed = readErrorCode(err);
+      const resolved = parsed.code ?? code;
+      try {
+        err.code = resolved;
+        if (parsed.code) {
+          err.message = parsed.message;
+        }
+      } catch {}
+      if (err.code !== resolved) {
+        return new UpdateError(parsed.message, resolved, { cause: err });
+      }
+    }
+    return err;
+  }
+  const parsed = readErrorCode(e);
+  return new UpdateError(
+    parsed.code ? parsed.message : String(e ?? code),
+    parsed.code ?? code
+  );
+};

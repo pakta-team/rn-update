@@ -1,0 +1,626 @@
+/**
+ * [INPUT]: 依赖 RCTPaktaDownloader 接口、Foundation NSURLSession/NSFileHandle、HTTP Range/If-Range 与本地 resume sidecar
+ * [OUTPUT]: 对外实现带超时、进度、断点续传、完整性校验和一次清零重试的流式文件下载
+ * [POS]: iOS 更新网络 IO 适配器，只保证归档字节可靠落盘；解压、补丁和版本状态由 RCTPakta.mm 负责
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+#import "RCTPaktaDownloader.h"
+#include "../../cpp/patch_core/archive_limits.h"
+
+static NSString *const RCTPaktaDownloaderErrorDomain = @"cn.reactnative.pakta";
+
+// Cross-launch resumable download (NATIVE_CHECKUPDATE_DESIGN §11.4): a data
+// task streams the archive straight into savePath (a download task's
+// temporary file is discarded on failure, which made every partial byte
+// worthless), and a sidecar next to it records what the partial belongs to
+// (url + validators + total). A brick gets a few hundred milliseconds per
+// launch plus a bounded crash-rescue window, so progress must be monotonic
+// across process deaths.
+
+NSString *RCTPaktaResumeSidecarPath(NSString *savePath) {
+    return [savePath stringByAppendingString:@".resume"];
+}
+
+static NSDictionary *RCTPaktaReadResumeMeta(NSString *savePath, NSString *url) {
+    NSData *data = [NSData dataWithContentsOfFile:RCTPaktaResumeSidecarPath(savePath)];
+    if (data == nil) {
+        return nil;
+    }
+    id meta = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (![meta isKindOfClass:[NSDictionary class]]) {
+        return nil;
+    }
+    // An archive whose sidecar names another URL is untrusted.
+    if (![url isEqualToString:meta[@"url"]]) {
+        return nil;
+    }
+    return meta;
+}
+
+static void RCTPaktaDeleteResumeSidecar(NSString *savePath) {
+    [[NSFileManager defaultManager] removeItemAtPath:RCTPaktaResumeSidecarPath(savePath)
+                                               error:nil];
+}
+
+long long RCTPaktaFileSize(NSString *path) {
+    NSDictionary *attributes =
+        [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+    NSNumber *size = attributes[NSFileSize];
+    return size == nil ? -1 : size.longLongValue;
+}
+
+// Free space on the volume holding `path` (walks up to an existing ancestor);
+// -1 when unknown.
+static long long RCTPaktaFreeDiskSpaceForPath(NSString *path) {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSString *probe = path;
+    while (probe.length > 1 && ![fileManager fileExistsAtPath:probe]) {
+        probe = [probe stringByDeletingLastPathComponent];
+    }
+    NSDictionary *attributes = [fileManager attributesOfFileSystemForPath:probe error:nil];
+    NSNumber *free = attributes[NSFileSystemFreeSize];
+    return free == nil ? -1 : free.longLongValue;
+}
+
+NSString *RCTPaktaFreeSpaceShortfall(NSString *path, long long bytesToWrite) {
+    long long free = RCTPaktaFreeDiskSpaceForPath(path);
+    if (free < 0) {
+        return nil;
+    }
+    long long needed = MAX(0LL, bytesToWrite) + pakta::archive_limits::kFreeDiskMarginBytes;
+    if (free < needed) {
+        return [NSString stringWithFormat:@"insufficient disk space: need %lld bytes, have %lld",
+                needed, free];
+    }
+    return nil;
+}
+
+// "bytes <start>-<end>/<total>". Returns the total (0 when "*"), or -1 when
+// missing/malformed, the start does not match the local partial, or the
+// range and total contradict each other (end before start, or a numeric
+// total not beyond the end — RFC 9110 §14.4). A total of 0 would otherwise
+// pass as "unknown" and skip the final size check.
+static long long RCTPaktaParseContentRange(NSString *header, long long expectedStart) {
+    if (![header hasPrefix:@"bytes "]) {
+        return -1;
+    }
+    NSString *range = [[header substringFromIndex:6]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    NSRange slash = [range rangeOfString:@"/"];
+    NSRange dash = [range rangeOfString:@"-"];
+    if (slash.location == NSNotFound || dash.location == NSNotFound
+        || dash.location > slash.location) {
+        return -1;
+    }
+    NSCharacterSet *whitespace = [NSCharacterSet whitespaceCharacterSet];
+    NSString *startPart = [[range substringToIndex:dash.location]
+        stringByTrimmingCharactersInSet:whitespace];
+    NSString *endPart = [[range substringWithRange:
+        NSMakeRange(dash.location + 1, slash.location - dash.location - 1)]
+        stringByTrimmingCharactersInSet:whitespace];
+    NSString *totalPart = [[range substringFromIndex:slash.location + 1]
+        stringByTrimmingCharactersInSet:whitespace];
+    // longLongValue reads 0 for non-numeric text; require real digits.
+    NSCharacterSet *digits = [NSCharacterSet decimalDigitCharacterSet];
+    if (startPart.length == 0 || endPart.length == 0
+        || [startPart rangeOfCharacterFromSet:digits.invertedSet].location != NSNotFound
+        || [endPart rangeOfCharacterFromSet:digits.invertedSet].location != NSNotFound) {
+        return -1;
+    }
+    long long start = startPart.longLongValue;
+    long long end = endPart.longLongValue;
+    if (start != expectedStart || end < start) {
+        return -1;
+    }
+    if ([totalPart isEqualToString:@"*"]) {
+        return 0;
+    }
+    if (totalPart.length == 0
+        || [totalPart rangeOfCharacterFromSet:digits.invertedSet].location != NSNotFound) {
+        return -1;
+    }
+    long long total = totalPart.longLongValue;
+    return total > end ? total : -1;
+}
+
+@interface RCTPaktaDownloader()<NSURLSessionDataDelegate>
+
+@property (nonatomic, strong) NSURLSession *session;
+@property (copy) void (^progressHandler)(long long, long long);
+@property (copy) void (^completionHandler)(NSString*, NSError*);
+@property (copy) NSString *savePath;
+@property (copy) NSString *urlString;
+@property (nonatomic, assign) NSTimeInterval timeoutInterval;
+@property (nonatomic, strong) NSFileHandle *fileHandle;
+@property (nonatomic, strong) NSDictionary *resumeMeta;
+@property (nonatomic, assign) long long resumeOffset;   // requested Range start
+@property (nonatomic, assign) long long baseOffset;     // granted by the response
+@property (nonatomic, assign) long long receivedBytes;  // streamed this session
+@property (nonatomic, assign) long long contentLength;  // this response's body
+@property (nonatomic, assign) long long expectedTotal;  // whole file (0 unknown)
+@property (nonatomic, strong) NSError *fileError;
+@property (nonatomic, assign) BOOL finished;
+@property (nonatomic, assign) BOOL retriedFromZero;
+// The server encoded the body itself (Content-Encoding other than identity):
+// NSURLSession delivers decoded bytes, so length accounting against the
+// encoded Content-Length is meaningless and resume offsets cannot be trusted.
+@property (nonatomic, assign) BOOL encodedBody;
+// The archive was rejected outright (over archive_limits::kMaxArchiveBytes):
+// nothing on disk is worth resuming, so completion drops the partial and its
+// sidecar instead of leaving them as resume state.
+@property (nonatomic, assign) BOOL discardPartial;
+@property (nonatomic, assign) int lastReportedPercentage;
+@property (nonatomic, assign) long long lastReportedBytes;
+// receivedBytes up to which free disk has been probed for (unknown-length
+// bodies; 0 = probe before the first write)
+@property (nonatomic, assign) long long freeSpaceReservedUntil;
+@end
+
+@implementation RCTPaktaDownloader
+
++ (void)download:(NSString *)downloadPath savePath:(NSString *)savePath
+timeoutInterval:(NSTimeInterval)timeoutInterval
+progressHandler:(void (^)(long long receivedBytes, long long totalBytes))progressHandler
+completionHandler:(void (^)(NSString *path, NSError *error))completionHandler
+{
+    NSAssert(downloadPath, @"no download path");
+    NSAssert(savePath, @"no save path");
+
+    RCTPaktaDownloader *downloader = [RCTPaktaDownloader new];
+    downloader.progressHandler = progressHandler;
+    downloader.completionHandler = completionHandler;
+    downloader.savePath = savePath;
+    downloader.urlString = downloadPath;
+    downloader.timeoutInterval = timeoutInterval;
+
+    [downloader startTransfer];
+}
+
+- (void)startTransfer
+{
+    NSURL *url = [NSURL URLWithString:self.urlString];
+    if (url == nil) {
+        [self completeWithError:[NSError errorWithDomain:RCTPaktaDownloaderErrorDomain
+                                                    code:-1
+                                                userInfo:@{
+                                                    NSLocalizedDescriptionKey: @"invalid download url",
+                                                }]];
+        return;
+    }
+
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    self.resumeMeta = RCTPaktaReadResumeMeta(self.savePath, self.urlString);
+    self.resumeOffset = 0;
+    if (self.resumeMeta != nil) {
+        long long size = RCTPaktaFileSize(self.savePath);
+        long long knownTotal = [self.resumeMeta[@"total"] longLongValue];
+        if (size > 0 && knownTotal > 0 && size == knownTotal) {
+            // Fully received in a previous attempt (the process died between
+            // download end and unzip): nothing left to transfer.
+            if (self.progressHandler) {
+                self.progressHandler(knownTotal, knownTotal);
+            }
+            [self completeWithError:nil];
+            return;
+        }
+        if (size > 0 && (knownTotal <= 0 || size < knownTotal)) {
+            self.resumeOffset = size;
+        }
+    }
+    if (self.resumeOffset == 0) {
+        [fileManager removeItemAtPath:self.savePath error:nil];
+        RCTPaktaDeleteResumeSidecar(self.savePath);
+    }
+
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    if (self.resumeOffset > 0) {
+        // Only resume requests pin the encoding: Range offsets must address
+        // the same bytes that are on disk. Fresh downloads keep the system's
+        // transparent gzip handling, matching the pre-resume behaviour for
+        // servers that compress regardless.
+        [request setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
+        [request setValue:[NSString stringWithFormat:@"bytes=%lld-", self.resumeOffset]
+       forHTTPHeaderField:@"Range"];
+        NSString *validator = self.resumeMeta[@"etag"] ?: self.resumeMeta[@"lastModified"];
+        if (validator != nil) {
+            // With a validator the server falls back to a full 200 when the
+            // file changed instead of appending mismatched bytes.
+            [request setValue:validator forHTTPHeaderField:@"If-Range"];
+        }
+    }
+
+    NSURLSessionConfiguration *sessionConfig = [NSURLSessionConfiguration defaultSessionConfiguration];
+    // Avoid hanging forever on a stalled connection (default resource timeout
+    // is 7 days). The 30s idle timeout matches Android's readTimeout and is
+    // what actually catches a stalled transfer; the total-duration cap matches
+    // Android's 10min callTimeout — 300s made a 30MB full package on a slow
+    // (<100KB/s) network fail on iOS while succeeding on Android.
+    sessionConfig.timeoutIntervalForRequest = 30;
+    sessionConfig.timeoutIntervalForResource = MAX(1, self.timeoutInterval);
+    self.session = [NSURLSession sessionWithConfiguration:sessionConfig
+                                                 delegate:self
+                                            delegateQueue:nil];
+
+    NSURLSessionDataTask *task = [self.session dataTaskWithRequest:request];
+    [task resume];
+}
+
+- (void)writeResumeMetaWithResponse:(NSHTTPURLResponse *)response total:(long long)total
+{
+    NSMutableDictionary *meta = [NSMutableDictionary dictionary];
+    meta[@"url"] = self.urlString;
+    NSString *etag = response.allHeaderFields[@"ETag"] ?: self.resumeMeta[@"etag"];
+    NSString *lastModified =
+        response.allHeaderFields[@"Last-Modified"] ?: self.resumeMeta[@"lastModified"];
+    if (etag != nil) {
+        meta[@"etag"] = etag;
+    }
+    if (lastModified != nil) {
+        meta[@"lastModified"] = lastModified;
+    }
+    if (total > 0) {
+        meta[@"total"] = @(total);
+    }
+    NSData *data = [NSJSONSerialization dataWithJSONObject:meta options:0 error:nil];
+    if (data != nil) {
+        // Non-fatal on failure: without a sidecar the next attempt starts
+        // from zero.
+        [data writeToFile:RCTPaktaResumeSidecarPath(self.savePath) atomically:YES];
+    }
+}
+
+- (void)completeWithError:(NSError *)error
+{
+    if (self.finished) {
+        return;
+    }
+    self.finished = YES;
+
+    if (self.fileHandle != nil) {
+        @try {
+            [self.fileHandle closeFile];
+        } @catch (NSException *exception) {
+        }
+        self.fileHandle = nil;
+    }
+    if (self.discardPartial) {
+        [[NSFileManager defaultManager] removeItemAtPath:self.savePath error:nil];
+        RCTPaktaDeleteResumeSidecar(self.savePath);
+    }
+
+    void (^completionHandler)(NSString *, NSError *) = self.completionHandler;
+    self.progressHandler = nil;
+    self.completionHandler = nil;
+    self.fileError = nil;
+
+    [self.session finishTasksAndInvalidate];
+    self.session = nil;
+
+    if (completionHandler) {
+        completionHandler(error == nil ? self.savePath : nil, error);
+    }
+}
+
+- (void)failWithDescription:(NSString *)description code:(NSInteger)code
+{
+    self.fileError = [NSError errorWithDomain:RCTPaktaDownloaderErrorDomain
+                                         code:code
+                                     userInfo:@{NSLocalizedDescriptionKey: description}];
+}
+
+// Drops the untrusted partial and reissues the whole request from zero, at
+// most once per download (the stale-partial 416 case). Delegate callbacks
+// from the superseded session are ignored via the session-identity guards.
+- (void)restartFromZero
+{
+    self.retriedFromZero = YES;
+    self.resumeMeta = nil;
+    self.resumeOffset = 0;
+    self.baseOffset = 0;
+    self.receivedBytes = 0;
+    self.contentLength = 0;
+    self.expectedTotal = 0;
+    self.encodedBody = NO;
+    self.lastReportedPercentage = 0;
+    self.lastReportedBytes = 0;
+    if (self.fileHandle != nil) {
+        @try {
+            [self.fileHandle closeFile];
+        } @catch (NSException *exception) {
+        }
+        self.fileHandle = nil;
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:self.savePath error:nil];
+    RCTPaktaDeleteResumeSidecar(self.savePath);
+    [self.session finishTasksAndInvalidate];
+    self.session = nil;
+    [self startTransfer];
+}
+
+#pragma mark - session delegate
+
+// An https artifact URL must stay on https through every redirect: the
+// package is the supply-chain boundary and TLS is what authenticates it.
+// Returning nil delivers the 3xx itself as the response, which the status
+// check below then rejects with the recorded reason.
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task
+willPerformHTTPRedirection:(NSHTTPURLResponse *)response
+        newRequest:(NSURLRequest *)request
+ completionHandler:(void (^)(NSURLRequest *))completionHandler
+{
+    if (session != self.session) {
+        completionHandler(nil);
+        return;
+    }
+    NSString *originalScheme = [[NSURL URLWithString:self.urlString].scheme lowercaseString];
+    NSString *nextScheme = [request.URL.scheme lowercaseString];
+    if ([originalScheme isEqualToString:@"https"] && [nextScheme isEqualToString:@"http"]) {
+        [self failWithDescription:[NSString stringWithFormat:
+            @"https download redirected to plaintext http: %@", request.URL.absoluteString]
+                             code:-1];
+        completionHandler(nil);
+        return;
+    }
+    completionHandler(request);
+}
+
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask
+didReceiveResponse:(NSURLResponse *)response
+ completionHandler:(void (^)(NSURLSessionResponseDisposition))completionHandler
+{
+    if (session != self.session) {
+        // A superseded session (restartFromZero) still delivering events.
+        completionHandler(NSURLSessionResponseCancel);
+        return;
+    }
+    NSHTTPURLResponse *httpResponse =
+        [response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)response : nil;
+    NSInteger statusCode = httpResponse.statusCode;
+
+    if (self.fileError != nil) {
+        // A refused redirect (see willPerformHTTPRedirection) already
+        // recorded the real reason; the 3xx being delivered here is not it.
+        completionHandler(NSURLSessionResponseCancel);
+        [self completeWithError:self.fileError];
+        return;
+    }
+    if (statusCode == 416) {
+        long long knownTotal = [self.resumeMeta[@"total"] longLongValue];
+        completionHandler(NSURLSessionResponseCancel);
+        if (knownTotal > 0 && RCTPaktaFileSize(self.savePath) == knownTotal) {
+            // The partial is actually the complete file.
+            [self completeWithError:nil];
+        } else if (!self.retriedFromZero) {
+            [self restartFromZero];
+        } else {
+            [self failWithDescription:@"server rejected the download range" code:statusCode];
+            [self completeWithError:self.fileError];
+        }
+        return;
+    }
+    if (httpResponse != nil && (statusCode < 200 || statusCode >= 300)) {
+        [self failWithDescription:[NSString stringWithFormat:@"unexpected http status code %ld",
+                                   (long)statusCode]
+                             code:statusCode];
+        completionHandler(NSURLSessionResponseCancel);
+        [self completeWithError:self.fileError];
+        return;
+    }
+
+    NSString *contentEncoding =
+        [httpResponse.allHeaderFields[@"Content-Encoding"] lowercaseString];
+    self.encodedBody =
+        contentEncoding.length > 0 && ![contentEncoding isEqualToString:@"identity"];
+
+    BOOL append = statusCode == 206 && self.resumeOffset > 0;
+    if (append && (self.encodedBody
+        || RCTPaktaParseContentRange(httpResponse.allHeaderFields[@"Content-Range"],
+                                     self.resumeOffset) < 0)) {
+        // Encoded range bytes or a malformed/mismatched Content-Range: the
+        // appended bytes could not be trusted. Treat like a stale partial —
+        // one clean retry from zero — instead of failing terminally, which
+        // would keep the partial and hit the same wall on every attempt.
+        completionHandler(NSURLSessionResponseCancel);
+        if (!self.retriedFromZero) {
+            [self restartFromZero];
+        } else {
+            [self failWithDescription:@"untrusted resume response" code:-1];
+            [self completeWithError:self.fileError];
+        }
+        return;
+    }
+    self.baseOffset = append ? self.resumeOffset : 0;
+    self.contentLength = response.expectedContentLength;
+    if (append) {
+        self.expectedTotal = RCTPaktaParseContentRange(
+            httpResponse.allHeaderFields[@"Content-Range"], self.resumeOffset);
+    } else if (self.encodedBody) {
+        // Decoded bytes are being written; the encoded lengths say nothing.
+        self.expectedTotal = 0;
+    } else {
+        self.expectedTotal = self.contentLength > 0 ? self.contentLength : 0;
+    }
+
+    // Caps from archive_limits.h, applied before the first body byte lands
+    // (Android does the same): the announced size up front here, streamed
+    // bytes in didReceiveData as the backstop for unknown/chunked lengths.
+    long long announcedTotal = self.expectedTotal;
+    if (announcedTotal <= 0 && !self.encodedBody && self.contentLength > 0) {
+        // A 206 whose Content-Range total is "*" still announces this body.
+        announcedTotal = self.baseOffset + self.contentLength;
+    }
+    if (announcedTotal > pakta::archive_limits::kMaxArchiveBytes) {
+        [self failWithDescription:[NSString stringWithFormat:@"archive too large: %lld bytes",
+                                   announcedTotal]
+                             code:-1];
+        self.discardPartial = YES;
+        completionHandler(NSURLSessionResponseCancel);
+        [self completeWithError:self.fileError];
+        return;
+    }
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    if (!append) {
+        // The server ignored the range (or none was sent): the stale partial
+        // is dead weight either way, so free it before the space check
+        // counts it against this download (a full restart must not fail
+        // forever on space the partial itself is holding).
+        [fileManager removeItemAtPath:self.savePath error:nil];
+    }
+    NSString *shortfall = RCTPaktaFreeSpaceShortfall(
+        self.savePath, announcedTotal > 0 ? announcedTotal - self.baseOffset : 0);
+    if (shortfall != nil) {
+        // A resumable partial stays: a later attempt may find the space.
+        [self failWithDescription:shortfall code:-1];
+        completionHandler(NSURLSessionResponseCancel);
+        [self completeWithError:self.fileError];
+        return;
+    }
+    if (!append) {
+        [fileManager createFileAtPath:self.savePath contents:nil attributes:nil];
+    }
+    self.freeSpaceReservedUntil = 0;
+    self.fileHandle = [NSFileHandle fileHandleForWritingAtPath:self.savePath];
+    if (self.fileHandle == nil) {
+        [self failWithDescription:@"cannot open download file for writing" code:-1];
+        completionHandler(NSURLSessionResponseCancel);
+        [self completeWithError:self.fileError];
+        return;
+    }
+    if (append) {
+        @try {
+            [self.fileHandle seekToEndOfFile];
+        } @catch (NSException *exception) {
+            [self failWithDescription:@"cannot seek download file" code:-1];
+            completionHandler(NSURLSessionResponseCancel);
+            [self completeWithError:self.fileError];
+            return;
+        }
+    }
+    if (self.encodedBody) {
+        // No resume across an encoded transfer: on-disk bytes are decoded,
+        // Range offsets would address the encoded representation.
+        RCTPaktaDeleteResumeSidecar(self.savePath);
+    } else if (httpResponse != nil) {
+        // Persist before streaming so a mid-stream crash can resume.
+        [self writeResumeMetaWithResponse:httpResponse total:self.expectedTotal];
+    }
+    completionHandler(NSURLSessionResponseAllow);
+}
+
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask
+    didReceiveData:(NSData *)data
+{
+    if (session != self.session) {
+        return;
+    }
+    if (self.fileHandle == nil || self.fileError != nil) {
+        return;
+    }
+    if (self.baseOffset + self.receivedBytes + (long long)data.length
+        > pakta::archive_limits::kMaxArchiveBytes) {
+        // Unknown/chunked length backstop; an announced size was already
+        // checked in didReceiveResponse. Checked before the write so the
+        // file on disk never exceeds the cap.
+        [self failWithDescription:[NSString stringWithFormat:
+            @"archive too large: exceeded %lld bytes",
+            pakta::archive_limits::kMaxArchiveBytes]
+                             code:-1];
+        self.discardPartial = YES;
+        [dataTask cancel];
+        return;
+    }
+    if (self.expectedTotal <= 0
+        && self.receivedBytes + (long long)data.length > self.freeSpaceReservedUntil) {
+        // Unknown/encoded length: the response-time check could only
+        // reserve the margin, so probe before any write that would run past
+        // the bytes reserved so far, each probe reserving at least the next
+        // PROBE bytes (more when one callback carries a larger buffer) — no
+        // write can ever eat into the margin. The archive cap alone (512
+        // MiB) is far more than the margin protects. The partial stays: a
+        // later attempt may find the space.
+        long long reserve = MAX(pakta::archive_limits::kUnknownLengthFreeSpaceProbeBytes,
+                                (long long)data.length);
+        self.freeSpaceReservedUntil = self.receivedBytes + reserve;
+        NSString *shortfall = RCTPaktaFreeSpaceShortfall(self.savePath, reserve);
+        if (shortfall != nil) {
+            [self failWithDescription:shortfall code:-1];
+            [dataTask cancel];
+            return;
+        }
+    }
+    @try {
+        [self.fileHandle writeData:data];
+    } @catch (NSException *exception) {
+        [self failWithDescription:[NSString stringWithFormat:@"write failed: %@",
+                                   exception.reason]
+                             code:-1];
+        [dataTask cancel];
+        return;
+    }
+    self.receivedBytes += data.length;
+
+    if (!self.progressHandler) {
+        return;
+    }
+    long long overall = self.baseOffset + self.receivedBytes;
+    long long total = self.expectedTotal;
+    if (overall > total) {
+        // Should not happen with identity encoding; treat as unknown so the
+        // JS side never sees percentages past 100.
+        total = 0;
+    }
+    if (total > 0) {
+        int percentage = (int)((overall * 100.0 / total) + 0.5);
+        if (percentage <= self.lastReportedPercentage) {
+            return;
+        }
+        self.lastReportedPercentage = percentage;
+    } else {
+        // Total unknown: throttle by bytes to avoid flooding the bridge.
+        if (overall - self.lastReportedBytes < 256 * 1024) {
+            return;
+        }
+        self.lastReportedBytes = overall;
+    }
+    self.progressHandler(overall, total);
+}
+
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task
+didCompleteWithError:(NSError *)error
+{
+    if (session != self.session) {
+        // A superseded session (restartFromZero) settling its cancelled
+        // task; only the current session may decide this download's fate.
+        return;
+    }
+    if (self.finished) {
+        return;
+    }
+    // The locally recorded failure (e.g. a write error that cancelled the
+    // task) is the actual cause; the session error would just say
+    // "cancelled".
+    NSError *finalError = self.fileError ?: error;
+    if (finalError == nil && !self.encodedBody) {
+        // Reject truncated transfers like Android/Harmony do. Skipped for
+        // encoded bodies: the on-disk size is decoded bytes while the
+        // expected lengths count encoded ones.
+        if (self.contentLength >= 0 && self.receivedBytes != self.contentLength) {
+            [self failWithDescription:[NSString stringWithFormat:
+                @"download incomplete: expected %lld bytes, got %lld",
+                self.contentLength, self.receivedBytes] code:-1];
+            finalError = self.fileError;
+        } else if (self.expectedTotal > 0
+                   && RCTPaktaFileSize(self.savePath) != self.expectedTotal) {
+            [self failWithDescription:[NSString stringWithFormat:
+                @"download incomplete: expected %lld total bytes, got %lld",
+                self.expectedTotal, RCTPaktaFileSize(self.savePath)] code:-1];
+            finalError = self.fileError;
+        }
+    }
+    // On failure the partial + sidecar stay on disk — that is the resume
+    // state a later launch (or crash-rescue window) picks up — unless the
+    // archive was rejected outright (discardPartial).
+    [self completeWithError:finalError];
+}
+
+@end

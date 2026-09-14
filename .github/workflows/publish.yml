@@ -1,13 +1,14 @@
-# [INPUT]: 依赖 GitHub Release tag、Bun/npm、Android NDK、HarmonyOS 构建容器与 npm OIDC
+# [INPUT]: 依赖 Git tag、Bun/npm、Android NDK、HarmonyOS 构建容器与 npm OIDC
 # [OUTPUT]: 校验 SDK、构建 Android SO/Harmony HAR，并将 rn-update 发布到 npm
-# [POS]: 独立公开 SDK 仓库的发布闸门；tag 是版本事实源，发布不依赖 monorepo 脚本
+# [POS]: 独立公开 SDK 仓库的发布闸门；手动推送 tag 是唯一版本入口，并自动生成 GitHub Release
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 name: Publish Package to npmjs
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -16,14 +17,13 @@ on:
         type: string
 
 env:
-  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
-  group: npm-publish-${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
+  group: npm-publish-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -36,7 +36,7 @@ jobs:
           fetch-depth: 0
           submodules: recursive
           persist-credentials: false
-          ref: ${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
+          ref: ${{ inputs.release_tag || github.ref_name }}
 
       - uses: oven-sh/setup-bun@v2
 
@@ -85,7 +85,7 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
-          ref: ${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
+          ref: ${{ inputs.release_tag || github.ref_name }}
 
       - name: Install pinned Android NDK
         run: echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION"
@@ -99,17 +99,47 @@ jobs:
           path: android/lib/
           if-no-files-found: error
 
-  publish:
+  create_release:
     needs: [verify, build_android_so]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub Release from tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; reusing it"
+            exit 0
+          fi
+
+          RELEASE_ARGS=(--verify-tag --generate-notes)
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            RELEASE_ARGS+=(--prerelease)
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            "${RELEASE_ARGS[@]}"
+
+  publish:
+    needs: [verify, build_android_so, create_release]
     runs-on: ubuntu-latest
     container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest
     timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
           persist-credentials: false
-          ref: ${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
+          ref: ${{ inputs.release_tag || github.ref_name }}
 
       - name: Configure git safe directories
         shell: bash

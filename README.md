@@ -10,7 +10,7 @@
 
 **Over-the-air (OTA) JavaScript and asset updates** for **React Native, Expo and HarmonyOS**. Differential downloads, staged rollouts and crash rollback, built into your app.
 
-[简体中文](./README-CN.md) · [Pakta](https://pakta.site) · [Quick start](#quick-start) · [CLI](https://github.com/pakta-team/rn-update-cli/blob/main/README.md) · [Pricing](https://pakta.site/pricing)
+[简体中文](./README-CN.md) · [Pakta](https://pakta.site/en/) · [Quick start](#quick-start) · [Code integration guide](https://pakta.site/en/docs/integration/) · [CLI](https://github.com/pakta-team/rn-update-cli/blob/main/README.md) · [Pricing](https://pakta.site/en/pricing/)
 
 ---
 

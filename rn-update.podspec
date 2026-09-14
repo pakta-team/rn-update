@@ -102,8 +102,10 @@ Pod::Spec.new do |s|
   # relative to the including file (the cpp/ core via ../../cpp/...), and the
   # former absolute "#{podspec_dir}/ios" entry made the generated xcconfig
   # machine-specific.
+  # Expo 的 DEFINES_MODULE 会为模块生成 umbrella header；公共头实际会被
+  # CocoaPods 复制到以 Pod 名称命名的路径，必须把当前包的路径加入搜索范围。
   s.pod_target_xcconfig = { 
-    'USER_HEADER_SEARCH_PATHS' => "\"$(PODS_ROOT)/Headers/Public/SSZipArchive\" \"$(PODS_ROOT)/Headers/Public/React-Codegen/RCTPaktaSpec\"",
+    'USER_HEADER_SEARCH_PATHS' => "\"$(PODS_ROOT)/Headers/Public/rn-update\" \"$(PODS_ROOT)/Headers/Public/SSZipArchive\" \"$(PODS_ROOT)/Headers/Public/React-Codegen/RCTPaktaSpec\"",
     "DEFINES_MODULE" => "YES" 
   }
   # buildTime for binary-rebuild detection (SyncBinaryVersion) and the check
@@ -145,6 +147,9 @@ Pod::Spec.new do |s|
 
   # Conditionally add Expo dependency
   if valid_expo_project
+    # DEFINES_MODULE 的 umbrella 会列出公共头；仅声明 public_header_files
+    # 不会把 ImportReact.h 放入 Headers/Public，Expo Swift 模块因此无法编译。
+    s.source_files = 'ios/ImportReact.h'
     s.public_header_files = ['ios/ImportReact.h']
     s.dependency 'ExpoModulesCore'
   end

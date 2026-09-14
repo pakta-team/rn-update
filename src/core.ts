@@ -9,6 +9,9 @@ import { UpdateError } from './error';
 import i18n from './i18n';
 import { emptyModule, error, log } from './utils';
 
+// React Native 运行时提供 global，但消费端不应被迫安装 Node 类型才能解析 SDK。
+declare const global: typeof globalThis;
+
 /* eslint-disable @react-native/no-deep-imports */
 const {
   version: v,

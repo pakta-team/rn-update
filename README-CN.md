@@ -10,7 +10,7 @@
 
 面向 **React Native、Expo、HarmonyOS** 的 **OTA 热更新 SDK**。更新 JavaScript 与资源，支持差分下载、灰度投放与崩溃回滚。
 
-[English](./README.md) · [Pakta](https://pakta.site) · [快速开始](#quick-start) · [CLI](https://github.com/pakta-team/rn-update-cli/blob/main/README.zh-CN.md) · [价格](https://pakta.site/pricing)
+[English](./README.md) · [Pakta](https://pakta.site/zh-CN/) · [快速开始](#quick-start) · [代码集成文档](https://pakta.site/zh-CN/docs/integration/) · [CLI](https://github.com/pakta-team/rn-update-cli/blob/main/README.zh-CN.md) · [价格](https://pakta.site/zh-CN/pricing/)
 
 ---
 

@@ -181,7 +181,7 @@ function Home() {
               >
                 <Text style={{ color: '#2196F3' }}>下次再说</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={switchVersion}>
+              <TouchableOpacity onPress={() => switchVersion()}>
                 <Text style={{ color: '#2196F3' }}>立即重启</Text>
               </TouchableOpacity>
             </View>

@@ -44,6 +44,18 @@ On iOS, also run `pod install` in the `ios` directory. Configure **native bundle
 
 > Expo requires a development or production build containing this native module; Expo Go is not supported. Native code or dependency changes require a new native binary.
 
+Expo apps can also declare the config plugin to pin the distribution channel into the native package:
+
+```json
+{
+  "expo": {
+    "plugins": [["rn-update", { "channel": "staging" }]]
+  }
+}
+```
+
+`channel` is the only value this plugin writes to the native project — `appKey` and server endpoints stay in the JS client, so configuration has a single source of truth. Omit `channel` to keep the default channel.
+
 ### 2. Connect Pakta at the root
 
 Get your platform-specific `appKey` from the dashboard and create the client outside the component:

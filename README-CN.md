@@ -46,6 +46,18 @@ iOS 还需在 `ios` 目录运行 `pod install`。按下方示例配置 **bundle 
 
 > Expo 需要包含本原生模块的开发或正式构建，Expo Go 不支持。修改原生代码或依赖后，需要分发新的原生包。
 
+Expo 应用还可以声明 config plugin，把分发渠道固化进原生包：
+
+```json
+{
+  "expo": {
+    "plugins": [["rn-update", { "channel": "staging" }]]
+  }
+}
+```
+
+`channel` 是该插件写入原生工程的唯一值——`appKey` 与服务端地址仍留在 JS 客户端，保证配置单一真相源。不填 `channel` 则使用默认渠道。
+
 ### 2. 在根组件连接 Pakta
 
 从控制台获取对应平台的 `appKey`，在组件外创建客户端：

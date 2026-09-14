@@ -25,6 +25,12 @@
       "expo-router",
       "expo-web-browser",
       [
+        "rn-update",
+        {
+          "channel": "staging"
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",

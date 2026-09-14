@@ -25,6 +25,7 @@
     "rn-update.podspec",
     "react-native.config.js",
     "expo-module.config.json",
+    "app.plugin.js",
     "README.md",
     "README-CN.md",
     "LICENSE",
@@ -34,7 +35,7 @@
     "prepublishOnly": "bun scripts/prepublish.ts",
     "publish:local": "SKIP_NATIVE_BUILD=1 npm publish",
     "prepack": "bun submodule && bun lint",
-    "lint": "biome check src && tsc --noEmit && node scripts/check-harmony-types.js && node scripts/check-native-spec-parity.js",
+    "lint": "biome check src app.plugin.js && tsc --noEmit && node scripts/check-harmony-types.js && node scripts/check-native-spec-parity.js",
     "lint:harmony": "node scripts/check-harmony-types.js",
     "submodule": "git submodule update --init --recursive",
     "test": "bun test src/__tests__",
@@ -94,6 +95,7 @@
   },
   "homepage": "https://github.com/pakta-team/rn-update#readme",
   "dependencies": {
+    "@expo/config-plugins": "~57.0.9",
     "nanoid": "^3.3.3"
   },
   "codegenConfig": {

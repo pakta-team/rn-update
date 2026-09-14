@@ -29,6 +29,7 @@ const allowedPrefixes = [
   'rn-update.podspec',
   'react-native.config.js',
   'expo-module.config.json',
+  'app.plugin.js',
   'package.json',
   'README.md',
   'README-CN.md',
@@ -64,6 +65,7 @@ const required = [
   'harmony/pakta/src/main/ets/PaktaTurboModule.ts',
   'harmony/hvigor-plugin.ts',
   'expo-module.config.json',
+  'app.plugin.js',
   'react-native.config.js',
   ...(release ? ['harmony/pakta.har'] : []),
 ];

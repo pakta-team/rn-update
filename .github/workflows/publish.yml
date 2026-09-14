@@ -1,0 +1,178 @@
+# [INPUT]: 依赖 GitHub Release tag、Bun/npm、Android NDK、HarmonyOS 构建容器与 npm OIDC
+# [OUTPUT]: 校验 SDK、构建 Android SO/Harmony HAR，并将 rn-update 发布到 npm
+# [POS]: 独立公开 SDK 仓库的发布闸门；tag 是版本事实源，发布不依赖 monorepo 脚本
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
+name: Publish Package to npmjs
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing tag to publish, for example v1.1.1'
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.x'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Prepare publish version from release tag
+        env:
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const tag = process.env.RELEASE_TAG.trim();
+          const version = tag.replace(/^v/, '');
+          if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+            throw new Error(`Invalid release tag: ${tag}`);
+          }
+          const file = 'package.json';
+          const packageJson = JSON.parse(fs.readFileSync(file, 'utf8'));
+          packageJson.version = version;
+          fs.writeFileSync(file, `${JSON.stringify(packageJson, null, 2)}\n`);
+          console.log(`Publishing rn-update@${version}`);
+          NODE
+
+      - name: Run lint
+        run: bun run lint
+
+      - name: Run unit tests
+        run: bun run test
+
+  build_android_so:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Keep this in sync with scripts/build-android-so.sh.
+      NDK_VERSION: 28.2.13676358
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
+
+      - name: Install pinned Android NDK
+        run: echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION"
+
+      - name: Build and verify Android native libraries
+        run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION" bash scripts/build-android-so.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-so
+          path: android/lib/
+          if-no-files-found: error
+
+  publish:
+    needs: [verify, build_android_so]
+    runs-on: ubuntu-latest
+    container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
+
+      - name: Configure git safe directories
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git submodule foreach --recursive 'git config --global --add safe.directory "$toplevel/$sm_path"'
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.x'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Prepare publish version from release tag
+        env:
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const tag = process.env.RELEASE_TAG.trim();
+          const version = tag.replace(/^v/, '');
+          const file = 'package.json';
+          const packageJson = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (packageJson.version !== version) {
+            packageJson.version = version;
+            fs.writeFileSync(file, `${JSON.stringify(packageJson, null, 2)}\n`);
+          }
+          NODE
+
+      - name: Replace committed Android libraries with CI builds
+        shell: bash
+        run: rm -rf android/lib
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-so
+          path: android/lib
+
+      - name: Verify Android native libraries
+        run: node scripts/verify-android-so.js
+
+      - name: Build Harmony HAR
+        run: npm run build:harmony-har -- --build-mode release
+
+      - name: Verify publishable package contents
+        shell: bash
+        run: |
+          test -f harmony/pakta.har
+          node scripts/check-packlist.js --release
+          npm pack --dry-run --ignore-scripts
+
+      - name: Publish to npm with OIDC provenance
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            npm publish --ignore-scripts --provenance --access public --tag beta
+          else
+            npm publish --ignore-scripts --provenance --access public
+          fi

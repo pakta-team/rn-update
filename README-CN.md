@@ -1,4 +1,10 @@
-# rn-update · React Native 热更新 SDK
+<!--
+[INPUT]: 依赖 SDK 公开 API、平台接入示例与 Pakta 选型文档
+[OUTPUT]: 提供中文产品介绍、CodePush/Expo 选型入口与接入指南
+[POS]: SDK 的中文入口，与 README.md 保持语义一致
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+-->
+# rn-update — React Native 与 Expo OTA 热更新
 
 ![Pakta SDK — check, download, activate](./readme-banner.svg)
 
@@ -8,7 +14,9 @@
 
 ### 让每一次修复，更快抵达用户。
 
-面向 **React Native、Expo、HarmonyOS** 的 **OTA 热更新 SDK**。更新 JavaScript 与资源，支持差分下载、灰度投放与崩溃回滚。
+用 **Pakta** 交付 **React Native 与 Expo OTA 热更新**。正在寻找 **CodePush 替代方案**，或对比 **EAS Update**？rn-update 是支持 **iOS、Android 与 HarmonyOS** 的开源 SDK，提供差分下载、灰度投放与崩溃回滚。
+
+沿用现有项目，接入 SDK、发布一次新版 App，即可向升级后的用户交付 JavaScript 与资源热更新。
 
 [English](./README.md) · [Pakta](https://pakta.site/zh-CN/) · [快速开始](#quick-start) · [代码集成文档](https://pakta.site/zh-CN/docs/integration/) · [CLI](https://github.com/pakta-team/rn-update-cli/blob/main/README.zh-CN.md) · [价格](https://pakta.site/zh-CN/pricing/)
 
@@ -23,6 +31,20 @@
 | **更新策略** | 静默下载、稍后生效，或提示用户后更新 |
 | **崩溃恢复** | 健康确认、崩溃回滚与原生冷启动修复通道 |
 | **可观测性** | 更新状态、下载进度与 Sentry / Crashlytics 关联 |
+
+## CodePush 替代方案：迁移到 Pakta
+
+为现有 React Native 应用接入差分更新、灰度发布与崩溃恢复。接入 `rn-update`、配置渠道，再用 **pakta CLI** 发布更新。发布一次包含 SDK 的新版 App，升级后的用户即可接收 Pakta OTA 更新。
+
+**[查看 CodePush 迁移指南 →](https://pakta.site/zh-CN/docs/codepush-alternative/)**
+
+## Expo Updates / EAS Update 替代方案
+
+在 Expo 开发与正式构建中使用 **Pakta 热更新**，通过一个平台管理 React Native、Expo 与 HarmonyOS 更新，享受差分交付与清晰的年度套餐。
+
+从接入方式、发布流程和流量费用选择适合你的方案。Pakta 使用 `rn-update` 与 pakta CLI；从 `expo-updates` 迁移时，完成原生接入并发布一次新版 App 即可开始使用。
+
+**[Expo Updates 与 Pakta：接入与费用对比 →](https://pakta.site/zh-CN/docs/expo-updates-vs-pakta/)** · **[Pakta 套餐与流量费用对比 →](https://pakta.site/zh-CN/pricing/)**
 
 <a id="quick-start"></a>
 

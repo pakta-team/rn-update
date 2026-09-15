@@ -1,4 +1,10 @@
-# rn-update · React Native OTA Update SDK
+<!--
+[INPUT]: 依赖 SDK 公开 API、平台接入示例与 Pakta 选型文档
+[OUTPUT]: 提供英文产品介绍、CodePush/Expo 选型入口与接入指南
+[POS]: SDK 的 GitHub/npm 英文入口，与 README-CN.md 保持语义一致
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+-->
+# rn-update — React Native & Expo OTA Updates
 
 ![Pakta SDK — check, download, activate](./readme-banner.svg)
 
@@ -8,7 +14,9 @@
 
 ### Ship the fix. Keep moving.
 
-**Over-the-air (OTA) JavaScript and asset updates** for **React Native, Expo and HarmonyOS**. Differential downloads, staged rollouts and crash rollback, built into your app.
+Ship **React Native and Expo OTA updates** with **Pakta**. Looking for a **CodePush alternative** or comparing **EAS Update**? rn-update is an open-source SDK with differential downloads, staged rollouts and crash rollback for **iOS, Android and HarmonyOS**.
+
+Keep your existing project, integrate the SDK and ship a new app build. Then deliver JavaScript and asset updates over the air to users on that build.
 
 [简体中文](./README-CN.md) · [Pakta](https://pakta.site/en/) · [Quick start](#quick-start) · [Code integration guide](https://pakta.site/en/docs/integration/) · [CLI](https://github.com/pakta-team/rn-update-cli/blob/main/README.md) · [Pricing](https://pakta.site/en/pricing/)
 
@@ -23,6 +31,20 @@
 | **Flexible activation** | Download silently, activate later, or prompt your users |
 | **Crash recovery** | Health checks, rollback and a native cold-start repair path |
 | **Observability** | Update state, download progress and Sentry / Crashlytics integration |
+
+## CodePush alternative: move to Pakta
+
+Bring your existing React Native app to Pakta for differential updates, controlled rollouts and crash recovery. Integrate `rn-update`, configure your channels and publish with the **pakta CLI**. Ship a new app build containing the SDK to start delivering Pakta OTA updates to your users.
+
+**[CodePush migration guide →](https://pakta.site/en/docs/codepush-alternative/)**
+
+## Expo Updates / EAS Update alternative
+
+Use Pakta for **Expo OTA updates** in development and production builds. Manage React Native, Expo and HarmonyOS updates from one platform, with differential delivery and clear annual plans.
+
+Compare the SDK integration, update workflow and bandwidth costs before choosing your setup. Pakta uses `rn-update` and the pakta CLI; migrating from `expo-updates` includes native integration and a new app build.
+
+**[Expo Updates vs Pakta: integration and costs →](https://pakta.site/en/docs/expo-updates-vs-pakta/)** · **[Pakta plans and bandwidth comparison →](https://pakta.site/en/pricing/)**
 
 ## Quick start
 

@@ -85,6 +85,9 @@ node /mnt/d/code/rn-update/rn-update/Example/e2etest/scripts/generate-platform-d
 
 ## 已知坑（都踩过）
 
+- 基座必须是 release hap（`build-harmony-e2e.sh` 默认 `-p buildMode=release`，
+  可用 `RNU_HARMONY_BUILD_MODE` 覆盖）：debug hap 下 JS 层 `markSuccess` 被
+  跳过，第一次更新看似成功、重启即回滚。
 - `pakta bundle --platform harmony` 会把工程的 `rawfile/bundle.harmony.js`
   当中间产物**覆写**——产物准备必须在基座 bundle 之前跑。
 - ohpm 对 `file:` har 依赖有内容哈希缓存，har 重建后 hvigor 不会自动刷新

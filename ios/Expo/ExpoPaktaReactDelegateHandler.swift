@@ -13,7 +13,7 @@ public final class ExpoPaktaReactDelegateHandler: ExpoReactDelegateHandler {
       // 开发支持模式交还 Expo/Metro，不能让已有热更文件遮蔽开发服务器。
       return nil
       #else
-      RCTPakta.bundleURL()
+      return RCTPakta.bundleURL()
       #endif
     }
 

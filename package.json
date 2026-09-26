@@ -26,12 +26,14 @@
     "react-native.config.js",
     "expo-module.config.json",
     "app.plugin.js",
+    "check-expo-version.js",
     "README.md",
     "README-CN.md",
     "LICENSE",
     "readme-banner.svg"
   ],
   "scripts": {
+    "postinstall": "node check-expo-version.js",
     "prepublishOnly": "bun scripts/prepublish.ts",
     "publish:local": "SKIP_NATIVE_BUILD=1 npm publish",
     "prepack": "bun submodule && bun lint",
@@ -91,7 +93,7 @@
   },
   "peerDependencies": {
     "react": ">=16.8.0",
-    "react-native": ">=0.59.0"
+    "react-native": "*"
   },
   "homepage": "https://github.com/pakta-team/rn-update#readme",
   "dependencies": {

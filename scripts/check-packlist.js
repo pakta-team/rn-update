@@ -30,6 +30,7 @@ const allowedPrefixes = [
   'react-native.config.js',
   'expo-module.config.json',
   'app.plugin.js',
+  'check-expo-version.js',
   'package.json',
   'README.md',
   'README-CN.md',
@@ -66,6 +67,7 @@ const required = [
   'harmony/hvigor-plugin.ts',
   'expo-module.config.json',
   'app.plugin.js',
+  'check-expo-version.js',
   'react-native.config.js',
   ...(release ? ['harmony/pakta.har'] : []),
 ];

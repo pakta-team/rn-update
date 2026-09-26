@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 state_core.h 的不可变状态快照、调用方冻结的启动版本身份与启动策略
- * [OUTPUT]: 实现包体切换重置、版本激活、带版本比较的成功确认、回滚和启动状态解析
- * [POS]: state_core 的确定性转换实现，被 Android JNI 与 Harmony NAPI 持久化适配层调用
+ * [OUTPUT]: 实现包体切换重置、版本激活、带版本比较的成功确认、回滚和启动状态解析，以及 ForgetPurgedVersions(const State&)（tvOS 清理恢复：清当前/上一热更版本引用、保留 rolled_back_version）
+ * [POS]: state_core 的确定性转换实现，被 Android JNI、Harmony NAPI 持久化适配层与 iOS 清理恢复宿主调用
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #include "state_core.h"
@@ -86,6 +86,15 @@ State Rollback(const State& state) {
   next.first_time = false;
   next.first_time_ok = true;
   next.rolled_back_version = rolled_back_version;
+  return next;
+}
+
+State ForgetPurgedVersions(const State& state) {
+  State next = state;
+  next.current_version.clear();
+  next.last_version.clear();
+  next.first_time = false;
+  next.first_time_ok = true;
   return next;
 }
 

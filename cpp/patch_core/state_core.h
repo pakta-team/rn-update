@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖原生包版本、buildTime、当前/上一热更版本与首次启动标记
- * [OUTPUT]: 对外提供 State、带启动版本身份校验的成功结果模型及同步、切换、回滚、启动决策函数
+ * [OUTPUT]: 对外提供 State、带启动版本身份校验的成功结果模型及同步、切换、回滚、启动决策函数，以及 ForgetPurgedVersions(const State&) 声明（tvOS 清理恢复专用，交由调用方持久化）
  * [POS]: patch_core 的纯状态机，统一三端版本激活与崩溃救援语义，不承担持久化 IO
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -55,6 +55,12 @@ State ClearFirstTime(const State& state);
 State ClearRollbackMark(const State& state);
 
 State Rollback(const State& state);
+
+// The OS deleted the installed versions' files (tvOS purges Caches while the
+// app is not running): they were not rejected, so unlike Rollback this leaves
+// no rolled-back mark that would make the next check skip reinstalling them.
+// An existing mark (a rollback earlier in this launch) is kept.
+State ForgetPurgedVersions(const State& state);
 
 bool ShouldRollbackForBrokenFirstLoad(const State& state);
 

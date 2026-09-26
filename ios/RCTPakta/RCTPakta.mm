@@ -1,10 +1,11 @@
 /**
- * [INPUT]: 依赖 React Native 桥/事件与重载 API、RCTPaktaDownloader、SSZipArchive、UIKit/NSUserDefaults、JS 冻结的启动版本身份及 patch/state/update_flow 共享 C++ 核心
- * [OUTPUT]: 对外实现 RCTPakta 模块、bundleURL、下载/切包/回滚/重置/配置 API、版本绑定成功确认、进度事件和无 JS 冷启动检查/崩溃救援
- * [POS]: iOS 更新聚合核心，统一状态锁、文件队列和原生救砖提交；Swift Expo 层与 JS 桥均复用这一事实源
+ * [INPUT]: 依赖 React Native 桥/事件与重载 API、RCTPaktaDownloader、RCTPaktaNativeConfig 归一化器、SSZipArchive、UIKit/NSUserDefaults、JS 冻结的启动版本身份及 patch/state/update_flow 共享 C++ 核心
+ * [OUTPUT]: 对外实现 RCTPakta 模块、bundleURL、下载/切包/回滚/重置/配置 API、版本绑定成功确认、进度事件、无 JS 冷启动检查/崩溃救援，以及无桥宿主面 configure/hasRunnableConfig/prepareProcess/scheduleFromColdStart/restorePurgedLaunch:rolledBack:/checkAndUpdate 与 commitRoundWithGeneration:activated: 代际外参
+ * [POS]: iOS 更新聚合核心，统一状态锁、文件队列和原生救砖提交；Swift Expo 层、JS 桥与宿主无桥调用均复用这一事实源
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import "RCTPakta.h"
+#import "RCTPaktaNativeConfig.h"
 #import "RCTPaktaDownloader.h"
 #import "ZipArchive.h"
 #include "../../cpp/patch_core/archive_limits.h"
@@ -41,6 +42,13 @@
 
 #include <atomic>
 #include <sys/stat.h>
+
+// Immutable host-facing snapshot; activated always means NEXT launch.
+static NSDictionary *PaktaHostResult(NSString *status, NSString *reason,
+                                    NSString *hash, BOOL activated) {
+    return @{@"status": status, @"reason": reason ?: @"",
+             @"hash": hash ?: @"", @"activated": @(activated)};
+}
 
 static NSString *const keyPaktaInfo = @"REACTNATIVECN_PAKTA_INFO_KEY";
 // Binary identity (SyncBinaryVersion input). Prefixed like every other key:
@@ -96,6 +104,14 @@ static NSString * const PaktaErrorCodeKey = @"PaktaErrorCode";
 static NSString *PaktaCode(const char *code) {
     return [NSString stringWithUTF8String:code];
 }
+
+// cInfo.os label prefix; must match the JS side (core.ts) so the server
+// buckets tvOS devices apart from iOS ones.
+#if TARGET_OS_TV
+static NSString * const PaktaOsName = @"tvos";
+#else
+static NSString * const PaktaOsName = @"ios";
+#endif
 
 // event def
 static NSString * const EVENT_PROGRESS_DOWNLOAD = @"RCTPaktaDownloadProgress";
@@ -728,7 +744,14 @@ static void PaktaSwitchVersionLocked(NSString *hash) {
 // bundle — this is what lets a bricked hot update be replaced on the next
 // launch. Decisions come from cpp/update_flow_core; this class is IO glue.
 @interface RCTPaktaOrchestrator : NSObject
++ (void)persistConfiguration:(NSString *)config;
++ (BOOL)hasRunnableConfig;
++ (NSDictionary *)checkAndUpdate;
 + (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion;
+#if TARGET_OS_TV && !DEBUG
++ (BOOL)restorePurgedLaunch:(NSString *)purgedVersion
+                 rolledBack:(NSString *)launchRolledBackVersion;
+#endif
 + (void)markJsCheckCompleted:(NSString *)config;
 + (void)startRoundWithDeadline:(NSTimeInterval)deadlineUptime;
 + (void)runOnce:(NSString *)launchRolledBackVersion deadline:(NSTimeInterval)deadlineUptime;
@@ -739,7 +762,8 @@ static void PaktaSwitchVersionLocked(NSString *hash) {
                      responseText:(NSString *)responseText
                           request:(NSString *)requestBody
                            config:(NSString *)configJson
-                       responseAt:(long long)responseAtSeconds;
+                       responseAt:(long long)responseAtSeconds
+                        activated:(BOOL *)activatedOut;
 @end
 
 // One round per process, whoever starts it first — the delayed cold-start
@@ -752,6 +776,15 @@ static std::atomic<bool> paktaRoundCompleted{false};
 // it downloads (§11.3).
 static std::atomic<bool> paktaCrashRescueActive{false};
 static std::atomic<bool> paktaRescueAttempted{false};
+// Set when this process's round is the tvOS purged-version restore.
+static std::atomic<bool> paktaPurgeRestoreActive{false};
+// True while +bundleURL waits for that restore. Only then may the round
+// activate what it downloads on its own (JS has not started to decide), since
+// the launch resolves the bundle again afterwards. Closed once the wait ends,
+// timeout or not; guarded by the state lock that every activation commits
+// under, so a commit lands either before the close (and launches) or after it
+// (and is left to JS) — never selected behind the packaged bundle's back.
+static bool paktaPurgeRestoreWindowOpen = false;
 static dispatch_semaphore_t paktaRoundDone;
 static NSString *paktaLaunchRolledBackForRescue = nil;
 // A version this process downloaded but left for JS to activate. If the
@@ -769,11 +802,22 @@ static NSTimeInterval paktaProcessAnchorUptime = 0;
 // (markJsCheckCompleted). Process-scoped by design. Guarded by
 // @synchronized (RCTPaktaOrchestrator class).
 static NSString *paktaJsCompletedConfig = nil;
+// The group supplements (rather than consumes) the crash-rescue semaphore.
+static dispatch_group_t paktaHostRoundGroup;
+static std::atomic<bool> paktaNativeCheckReady{false};
+static NSDictionary *paktaHostRoundResult = nil;
+static NSString *paktaHostRoundConfig = nil;
+static uint64_t paktaHostRoundGeneration = 0;
+static std::atomic<uint64_t> paktaNativeConfigGeneration{0};
+static uint64_t paktaHostRoundConfigGeneration = 0;
 
 static const NSTimeInterval kPaktaRescueTriggerUptime = 60;
 static const NSTimeInterval kPaktaRescueBudgetBackgroundThread = 10;
 // A held main thread freezes UI teardown; stay well under the watchdog.
 static const NSTimeInterval kPaktaRescueBudgetMainThread = 3.5;
+// The purged-version restore blocks +bundleURL, usually inside
+// application:didFinishLaunching: — stay clear of the launch watchdog.
+static const NSTimeInterval kPaktaPurgeRestoreBudget = 12;
 
 static void PaktaMaybeHoldForRescue(void) {
     // Once per process; a second crashing thread passes straight through
@@ -924,8 +968,42 @@ RCT_EXPORT_MODULE(RCTPakta);
 + (NSURL *)bundleURL
 {
     paktaIsUsingBundleUrl = true;
+    NSString *launchRolledBackVersion = nil;
+    @try {
+        NSString *purgedVersion = nil;
+        NSURL *resolvedURL = [RCTPakta resolveLaunchBundleURL:&launchRolledBackVersion
+                                                purgedVersion:&purgedVersion];
+#if TARGET_OS_TV && !DEBUG
+        // tvOS deleted the installed version while the app was not running.
+        // The app is expected to be online: block the launch on a native
+        // round that reinstalls the latest version, instead of showing the
+        // packaged bundle and jumping forward again on a later launch.
+        if (purgedVersion != nil &&
+            [RCTPaktaOrchestrator restorePurgedLaunch:purgedVersion
+                                           rolledBack:launchRolledBackVersion]) {
+            resolvedURL = [RCTPakta resolveLaunchBundleURL:&launchRolledBackVersion
+                                             purgedVersion:&purgedVersion];
+        }
+#endif
+        return resolvedURL ?: [RCTPakta binaryBundleURL];
+    } @finally {
+        // State corruption is exactly when the rescue path matters most. If
+        // resolution throws before a snapshot exists, nil safely omits only
+        // this launch's rollback guard instead of disabling the check.
+        [RCTPaktaOrchestrator scheduleFromColdStart:launchRolledBackVersion];
+    }
+}
+
+// Resolves the bundle to launch from the persisted state; nil means the
+// packaged bundle. Consumes the launch's one-shot state (first_time), so a
+// second call is only valid after something re-armed it (a switchVersion).
+// purgedVersion is set on tvOS when the installed version's files are gone.
++ (NSURL *)resolveLaunchBundleURL:(NSString **)launchRolledBackVersionOut
+                    purgedVersion:(NSString **)purgedVersionOut
+{
     __block NSURL *resolvedURL = nil;
     __block NSString *launchRolledBackVersion = nil;
+    __block NSString *purgedVersion = nil;
     @try {
         PaktaWithStateLock(^{
             NSUserDefaults *defaults = PaktaDefaults();
@@ -1013,10 +1091,29 @@ RCT_EXPORT_MODULE(RCTPakta);
                     resolvedURL = [NSURL fileURLWithPath:bundlePath];
                     break;
                 } else {
+#if TARGET_OS_TV
+                    // Caches is purgeable on tvOS: a missing bundle is the OS
+                    // reclaiming space, not a bad release. Everything under
+                    // rctpakta went with it, so walking back to last_version
+                    // is pointless, and a rollback mark would make this
+                    // launch's check refuse to reinstall the version.
+                    RCTLogWarn(@"RCTPakta -- bundle version %@ was purged by the system", loadVersion);
+                    purgedVersion = loadVersion;
+                    state = pakta::state::ForgetPurgedVersions(state);
+                    PaktaApplyStateToDefaults(defaults, state);
+                    if (decision.consumed_first_time) {
+                        // The first load being consumed never happens: the
+                        // packaged bundle must not report isFirstTime.
+                        ignoreRollback = false;
+                        [defaults removeObjectForKey:keyFirstLoadMarked];
+                    }
+                    break;
+#else
                     RCTLogError(@"RCTPakta -- bundle version %@ not found, rolling back", loadVersion);
                     state = pakta::state::Rollback(state);
                     PaktaApplyStateToDefaults(defaults, state);
                     loadVersion = PaktaFromStdString(state.current_version);
+#endif
                 }
             }
         }
@@ -1025,13 +1122,11 @@ RCT_EXPORT_MODULE(RCTPakta);
         // launch just rolled back.
             launchRolledBackVersion = PaktaFromStdString(state.rolled_back_version);
         });
-        return resolvedURL ?: [RCTPakta binaryBundleURL];
     } @finally {
-        // State corruption is exactly when the rescue path matters most. If
-        // resolution throws before a snapshot exists, nil safely omits only
-        // this launch's rollback guard instead of disabling the check.
-        [RCTPaktaOrchestrator scheduleFromColdStart:launchRolledBackVersion];
+        *launchRolledBackVersionOut = launchRolledBackVersion;
+        *purgedVersionOut = purgedVersion;
     }
+    return resolvedURL;
 }
 
 + (NSString *) rollback {
@@ -1043,6 +1138,59 @@ RCT_EXPORT_MODULE(RCTPakta);
         currentVersion = PaktaFromStdString(state.current_version);
     });
     return currentVersion;
+}
+
++ (void)configure:(NSDictionary<NSString *, id> *)options
+       completion:(RCTPaktaNativeConfigurationCompletion)completion
+{
+    NSError *validationError = nil;
+    // Snapshot nested mutable caller values before crossing a queue boundary.
+    NSString *config = RCTPaktaNormalizeNativeConfig(options, &validationError);
+    static dispatch_queue_t configQueue;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        configQueue = dispatch_queue_create("cn.reactnative.pakta.host-config", DISPATCH_QUEUE_SERIAL);
+    });
+    dispatch_async(configQueue, ^{
+        NSError *failure = validationError;
+        if (config != nil) {
+            @try {
+                [RCTPaktaOrchestrator persistConfiguration:config];
+            } @catch (NSException *exception) {
+                failure = PaktaErrorWithCode(pakta::error_codes::kFileOperationFailed,
+                    exception.reason ?: @"Native configuration failed");
+            }
+        }
+        if (completion != nil) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(failure);
+            });
+        }
+    });
+}
+
++ (void)checkAndUpdateWithCompletion:(RCTPaktaNativeUpdateCompletion)completion
+{
+    static dispatch_queue_t hostQueue;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        hostQueue = dispatch_queue_create("cn.reactnative.pakta.host-check", DISPATCH_QUEUE_SERIAL);
+    });
+    dispatch_async(hostQueue, ^{
+        NSDictionary *result;
+        @try {
+            result = [RCTPaktaOrchestrator checkAndUpdate];
+        } @catch (NSException *exception) {
+            RCTLogWarn(@"RCTPakta -- native host check failed: %@", exception.reason);
+            result = PaktaHostResult(@"failed", @"internal_error", nil, NO);
+        }
+        if (completion != nil) {
+            NSDictionary *snapshot = [result copy];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(snapshot);
+            });
+        }
+    });
 }
 
 + (BOOL)requiresMainQueueSetup
@@ -1153,8 +1301,13 @@ RCT_EXPORT_METHOD(syncNativeConfig:(NSString *)config
             error != nil ? error.localizedDescription : ERROR_OPTIONS));
         return;
     }
-    [PaktaDefaults() setObject:config forKey:keyNativeConfig];
-    resolve(@true);
+    @try {
+        [RCTPaktaOrchestrator persistConfiguration:config];
+        resolve(@true);
+    } @catch (NSException *exception) {
+        PaktaRejectError(reject, PaktaErrorWithCode(pakta::error_codes::kFileOperationFailed,
+            exception.reason ?: @"Native configuration failed"));
+    }
 }
 
 RCT_EXPORT_METHOD(getNativeCheckCache:(RCTPromiseResolveBlock)resolve
@@ -1897,6 +2050,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
 // excluded from backups.
 + (void)excludeFromBackup:(NSString *)path
 {
+#if !TARGET_OS_TV  // tvOS stores under Caches, which is never backed up.
     NSURL *url = [NSURL fileURLWithPath:path isDirectory:YES];
     NSError *error = nil;
     if (![url setResourceValue:@YES
@@ -1904,6 +2058,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
                          error:&error]) {
         RCTLogWarn(@"Pakta exclude from backup error: %@", error.localizedDescription);
     }
+#endif
 }
 
 - (void)unzipFileAtPath:(NSString *)path
@@ -2025,7 +2180,15 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
 
 + (NSString *)downloadDir
 {
-    NSString *directory = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+#if TARGET_OS_TV
+    // tvOS apps cannot write Application Support; Caches is the only
+    // writable, non-temporary location, and the system may purge it while
+    // the app is not running (see the purged-version path in +bundleURL).
+    NSSearchPathDirectory base = NSCachesDirectory;
+#else
+    NSSearchPathDirectory base = NSApplicationSupportDirectory;
+#endif
+    NSString *directory = [NSSearchPathForDirectoriesInDomains(base, NSUserDomainMask, YES) firstObject];
     return [directory stringByAppendingPathComponent:@"rctpakta"];
 }
 
@@ -2204,6 +2367,58 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
 
 @implementation RCTPaktaOrchestrator
 
++ (void)persistConfiguration:(NSString *)config {
+    PaktaWithStateLock(^{
+        NSUserDefaults *defaults = PaktaDefaults();
+        if ([defaults stringForKey:keyUuid].length == 0) {
+            [defaults setObject:[NSUUID UUID].UUIDString forKey:keyUuid];
+        }
+        if ([[defaults stringForKey:keyNativeConfig] isEqualToString:config]) {
+            return;
+        }
+        // The same generation protects reset and replacement of the request
+        // identity/policy, including a late crash-rescue activation.
+        paktaResetGeneration.fetch_add(1);
+        paktaNativeConfigGeneration.fetch_add(1);
+        [defaults setObject:config forKey:keyNativeConfig];
+        [defaults removeObjectForKey:keyNativeCheckCache];
+        [self markJsCheckCompleted:nil];
+    });
+    if (paktaNativeCheckReady.load() && [self hasRunnableConfig]) {
+        PaktaInstallCrashRescueHandler();
+    }
+}
+
++ (BOOL)hasRunnableConfig {
+    NSString *json = [PaktaDefaults() stringForKey:keyNativeConfig];
+    if (json.length == 0) {
+        return NO;
+    }
+    bool ok = false;
+    flowjson::Value config = flowjson::Parse(PaktaToStdString(json), &ok);
+    return ok && config.IsObject() && !config.Get("disabled").Truthy()
+        && !config.Get("appKey").AsString().empty();
+}
+
+// Process-wide round state, set up by whichever launch path needs a round
+// first: the delayed cold-start check or the tvOS purged-version restore.
++ (void)prepareProcess:(NSString *)launchRolledBackVersion {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        paktaRoundDone = dispatch_semaphore_create(0);
+        paktaHostRoundGroup = dispatch_group_create();
+        dispatch_group_enter(paktaHostRoundGroup);
+        paktaProcessAnchorUptime = PaktaMonotonicNow();
+        paktaLaunchRolledBackForRescue = [launchRolledBackVersion copy];
+        paktaNativeCheckReady.store(true);
+        // The crash-hold rescue shares the orchestrator's rollout gate: no
+        // persisted config, no handler (§11.3).
+        if ([PaktaDefaults() stringForKey:keyNativeConfig].length > 0) {
+            PaktaInstallCrashRescueHandler();
+        }
+    });
+}
+
 + (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion {
 #if !DEBUG
     // Once per process; a few seconds of delay keeps the check away from the
@@ -2212,15 +2427,8 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
     // marker), in which case every launch second counts (§11.4).
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        paktaRoundDone = dispatch_semaphore_create(0);
-        paktaProcessAnchorUptime = PaktaMonotonicNow();
-        paktaLaunchRolledBackForRescue = [launchRolledBackVersion copy];
+        [self prepareProcess:launchRolledBackVersion];
         NSUserDefaults *defaults = PaktaDefaults();
-        // The crash-hold rescue shares the orchestrator's rollout gate: no
-        // persisted config, no handler (§11.3).
-        if ([defaults stringForKey:keyNativeConfig].length > 0) {
-            PaktaInstallCrashRescueHandler();
-        }
         int64_t delaySeconds =
             [defaults objectForKey:keyNativeCheckIncomplete] != nil ? 0 : 5;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delaySeconds * NSEC_PER_SEC),
@@ -2234,6 +2442,95 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
             [self startRoundWithDeadline:0];
         });
     });
+#endif
+}
+
+#if TARGET_OS_TV && !DEBUG
+// Runs this process's round before the first bundle loads, blocking the
+// caller for at most kPaktaPurgeRestoreBudget. The state no longer has a
+// current version, so the server answers with the latest version for the
+// packaged bundle, and the round activates it while the restore window is
+// open. Returns NO when no round can run; otherwise the caller must resolve
+// the launch bundle again: it launches whatever was activated before the
+// window closed, or the packaged bundle. The round stops at the same
+// deadline, keeping a partial download for the next check to resume.
++ (BOOL)restorePurgedLaunch:(NSString *)purgedVersion
+                 rolledBack:(NSString *)launchRolledBackVersion {
+    [self prepareProcess:launchRolledBackVersion];
+    if (![self hasRunnableConfig]) {
+        RCTLogWarn(@"RCTPakta -- version %@ was purged and no native check is "
+                   @"configured; launching the packaged bundle", purgedVersion);
+        return NO;
+    }
+    PaktaWithStateLock(^{
+        paktaPurgeRestoreWindowOpen = true;
+    });
+    paktaPurgeRestoreActive.store(true);
+    NSTimeInterval deadline = PaktaMonotonicNow() + kPaktaPurgeRestoreBudget;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        [self startRoundWithDeadline:deadline];
+        dispatch_semaphore_signal(done);
+    });
+    BOOL timedOut = dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW,
+        (int64_t)(kPaktaPurgeRestoreBudget * NSEC_PER_SEC))) != 0;
+    // The round's deadline does not bound a slow response (the request
+    // timeout is an idle timeout) nor a version already on disk, so the close
+    // is what stops a late activation — not the deadline.
+    PaktaWithStateLock(^{
+        paktaPurgeRestoreWindowOpen = false;
+    });
+    if (timedOut) {
+        RCTLogWarn(@"RCTPakta -- purged version %@ restore timed out", purgedVersion);
+    } else {
+        NSDictionary *result = paktaHostRoundResult;
+        RCTLogInfo(@"RCTPakta -- purged version %@ restore: %@ %@ %@", purgedVersion,
+                   result[@"status"], result[@"reason"], result[@"hash"]);
+    }
+    return YES;
+}
+#endif
+
++ (NSDictionary *)checkAndUpdate {
+#if DEBUG
+    return PaktaHostResult(@"skipped", @"debug", nil, NO);
+#else
+    if (!paktaNativeCheckReady.load()) {
+        return PaktaHostResult(@"skipped", @"not_initialized", nil, NO);
+    }
+    NSString *configJson = [PaktaDefaults() stringForKey:keyNativeConfig];
+    if (configJson.length == 0) {
+        return PaktaHostResult(@"skipped", @"not_configured", nil, NO);
+    }
+    id config = [NSJSONSerialization JSONObjectWithData:
+        [configJson dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    if (![config isKindOfClass:NSDictionary.class]) {
+        return PaktaHostResult(@"failed", @"invalid_config", nil, NO);
+    }
+    id disabled = config[@"disabled"];
+    if ([disabled respondsToSelector:@selector(boolValue)] && [disabled boolValue]) {
+        return PaktaHostResult(@"skipped", @"disabled", nil, NO);
+    }
+    id appKey = config[@"appKey"];
+    if (![appKey isKindOfClass:NSString.class] || [appKey length] == 0) {
+        return PaktaHostResult(@"failed", @"invalid_config", nil, NO);
+    }
+    [self startRoundWithDeadline:0];
+    // A group is broadcast-style. Sharing the rescue semaphore would let one
+    // waiter consume the only signal and leave the other waiting forever.
+    if (!paktaRoundStarted.load()) {
+        return PaktaHostResult(@"skipped", @"config_changed", nil, NO);
+    }
+    dispatch_group_wait(paktaHostRoundGroup, DISPATCH_TIME_FOREVER);
+    if (paktaHostRoundConfigGeneration != paktaNativeConfigGeneration.load()
+        || ![configJson isEqualToString:paktaHostRoundConfig]
+        || ![configJson isEqualToString:[PaktaDefaults() stringForKey:keyNativeConfig]]) {
+        return PaktaHostResult(@"cancelled", @"config_changed", nil, NO);
+    }
+    if (paktaHostRoundGeneration != paktaResetGeneration.load()) {
+        return PaktaHostResult(@"cancelled", @"reset", nil, NO);
+    }
+    return paktaHostRoundResult ?: PaktaHostResult(@"failed", @"internal_error", nil, NO);
 #endif
 }
 
@@ -2263,6 +2560,10 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
 // started it yet. deadlineUptime > 0 (crash rescue) caps every HTTP call and
 // download phase to the remaining budget.
 + (void)startRoundWithDeadline:(NSTimeInterval)deadlineUptime {
+    // Missing/disabled configuration is a preflight skip, not a used round.
+    if (![self hasRunnableConfig]) {
+        return;
+    }
     bool expected = false;
     if (!paktaRoundStarted.compare_exchange_strong(expected, true)) {
         return;
@@ -2272,9 +2573,11 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
     } @catch (NSException *exception) {
         // The rescue path must never take the app down with it.
         RCTLogWarn(@"RCTPakta -- native check crashed: %@", exception.reason);
+        paktaHostRoundResult = PaktaHostResult(@"failed", @"internal_error", nil, NO);
     } @finally {
         paktaRoundCompleted.store(true);
         dispatch_semaphore_signal(paktaRoundDone);
+        dispatch_group_leave(paktaHostRoundGroup);
     }
 }
 
@@ -2286,7 +2589,7 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
 + (void)runRescueWithDeadline:(NSTimeInterval)deadlineUptime {
     paktaCrashRescueActive.store(true);
     [self startRoundWithDeadline:deadlineUptime];
-    if (!paktaRoundCompleted.load()) {
+    if (paktaRoundStarted.load() && !paktaRoundCompleted.load()) {
         NSTimeInterval remaining = deadlineUptime - PaktaMonotonicNow();
         if (remaining > 0) {
             dispatch_semaphore_wait(paktaRoundDone, dispatch_time(DISPATCH_TIME_NOW,
@@ -2334,7 +2637,8 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
                                         responseText:nil
                                              request:nil
                                               config:nil
-                                          responseAt:0];
+                                          responseAt:0
+                                           activated:NULL];
     if (committed) {
         @synchronized (self) {
             paktaUnactivatedHash = nil;
@@ -2358,27 +2662,33 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
 }
 
 + (void)runOnce:(NSString *)launchRolledBackVersion deadline:(NSTimeInterval)deadlineUptime {
-    // Sampled before any IO: resetToPackagedBundle bumps it, and a reset that
-    // lands while this round is running must win over the round's decision.
     const uint64_t resetGeneration = paktaResetGeneration.load();
+    paktaHostRoundGeneration = resetGeneration;
+    paktaHostRoundConfigGeneration = paktaNativeConfigGeneration.load();
+    paktaHostRoundResult = PaktaHostResult(@"failed", @"check_failed", nil, NO);
     NSUserDefaults *defaults = PaktaDefaults();
     NSString *configJson = [defaults stringForKey:keyNativeConfig];
+    paktaHostRoundConfig = [configJson copy];
     if (configJson.length == 0) {
-        // No persisted config (old integration / first ever launch): the
-        // native check silently does not run — this is the rollout gate.
+        paktaHostRoundResult = PaktaHostResult(@"skipped", @"not_configured", nil, NO);
         return;
     }
     bool ok = false;
     flowjson::Value config = flowjson::Parse(PaktaToStdString(configJson), &ok);
-    if (!ok || !config.IsObject() || config.Get("disabled").Truthy()) {
+    if (!ok || !config.IsObject()) {
+        paktaHostRoundResult = PaktaHostResult(@"failed", @"invalid_config", nil, NO);
+        return;
+    }
+    if (config.Get("disabled").Truthy()) {
+        paktaHostRoundResult = PaktaHostResult(@"skipped", @"disabled", nil, NO);
         return;
     }
     NSString *appKey = PaktaFromStdString(config.Get("appKey").AsString());
     if (appKey.length == 0) {
+        paktaHostRoundResult = PaktaHostResult(@"failed", @"invalid_config", nil, NO);
         return;
     }
-    // From here on the round does real work: leave the breadcrumb that the
-    // next launch reads to skip its 5s delay if we die mid-round (§11.4).
+    // Preserve the interrupted-round breadcrumb and reset-safe atomic commit.
     [defaults setObject:@YES forKey:keyNativeCheckIncomplete];
     @try {
         [self runConfiguredRound:config
@@ -2430,7 +2740,7 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
     cInfo.Set("rnu", config.Get("rnu"));
     cInfo.Set("rn", config.Get("rn"));
     cInfo.Set("os", flowjson::Value::String(PaktaToStdString([NSString
-        stringWithFormat:@"ios %@", [[UIDevice currentDevice] systemVersion]])));
+        stringWithFormat:@"%@ %@", PaktaOsName, [[UIDevice currentDevice] systemVersion]])));
     cInfo.Set("uuid", flowjson::Value::String(PaktaToStdString(uuid)));
 
     flowjson::Value input = flowjson::Value::Object();
@@ -2456,6 +2766,7 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
     NSString *body = [NSString stringWithUTF8String:bodyJson.c_str()];
     if (body == nil) {
         RCTLogWarn(@"RCTPakta -- native check: request body is not valid UTF-8");
+        paktaHostRoundResult = PaktaHostResult(@"failed", @"invalid_request", nil, NO);
         return;
     }
 
@@ -2473,19 +2784,24 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
         PaktaToStdString(responseText), identity, false,
         config.Get("afterDownload").AsString());
     if (decision.Get("action").AsString() != "download") {
-        [self commitRoundWithGeneration:resetGeneration
+        BOOL committed = [self commitRoundWithGeneration:resetGeneration
                                hashInfo:nil
                                activate:nil
                            responseText:responseText
                                 request:body
                                  config:configJson
-                             responseAt:responseAtSeconds];
+                             responseAt:responseAtSeconds
+                              activated:NULL];
+        paktaHostRoundResult = committed
+            ? PaktaHostResult(@"noUpdate", PaktaFromStdString(decision.Get("reason").AsString()), nil, NO)
+            : PaktaHostResult(@"cancelled", @"reset", nil, NO);
         RCTLogInfo(@"RCTPakta -- native check: nothing to do (%s)",
                    decision.Get("reason").AsString().c_str());
         return;
     }
     NSString *hash = PaktaFromStdString(decision.Get("hash").AsString());
     if (!PaktaIsSafePathComponent(hash)) {
+        paktaHostRoundResult = PaktaHostResult(@"failed", @"invalid_response", nil, NO);
         return;
     }
 
@@ -2498,13 +2814,17 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
                                   deadline:deadlineUptime];
     }
     if (!downloaded) {
-        [self commitRoundWithGeneration:resetGeneration
+        BOOL committed = [self commitRoundWithGeneration:resetGeneration
                                hashInfo:nil
                                activate:nil
                            responseText:responseText
                                 request:body
                                  config:configJson
-                             responseAt:responseAtSeconds];
+                             responseAt:responseAtSeconds
+                              activated:NULL];
+        paktaHostRoundResult = committed
+            ? PaktaHostResult(@"failed", @"download_failed", nil, NO)
+            : PaktaHostResult(@"cancelled", @"reset", nil, NO);
         return;
     }
 
@@ -2531,15 +2851,21 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
     // remote override — the brick rescue) activate for the next launch;
     // otherwise activation stays with the JS side (§6/§10.1). Unless a crash
     // is being held: JS is dead, deferring to it would leave the fix on disk
-    // forever (§11.3).
-    BOOL activate = decision.Get("activate").Truthy() || paktaCrashRescueActive.load();
+    // forever (§11.3). Or the launch is blocked on reinstalling a version
+    // tvOS purged: JS has not started, and the whole point is to boot it —
+    // commitRoundWithGeneration drops that one once the restore window closed.
+    BOOL activate = decision.Get("activate").Truthy() || paktaCrashRescueActive.load()
+        || paktaPurgeRestoreActive.load();
+    BOOL activated = NO;
     BOOL committed = [self commitRoundWithGeneration:resetGeneration
                                             hashInfo:@{@"hash": hash, @"info": versionInfo}
                                             activate:activate ? hash : nil
                                         responseText:responseText
                                              request:body
                                               config:configJson
-                                          responseAt:responseAtSeconds];
+                                          responseAt:responseAtSeconds
+                                           activated:&activated];
+    activate = activated;
     if (!committed) {
         RCTLogInfo(@"RCTPakta -- native check: reset during round, dropping result");
     } else if (activate) {
@@ -2556,6 +2882,9 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
         }
         RCTLogInfo(@"RCTPakta -- native check: downloaded %@, activation left to JS", hash);
     }
+    paktaHostRoundResult = committed
+        ? PaktaHostResult(@"downloaded", @"", hash, activate)
+        : PaktaHostResult(@"cancelled", @"reset", nil, NO);
 }
 
 // Everything a round persists — version info, the activation, the response
@@ -2569,7 +2898,8 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
                      responseText:(NSString *)responseText
                           request:(NSString *)requestBody
                            config:(NSString *)configJson
-                       responseAt:(long long)responseAtSeconds {
+                       responseAt:(long long)responseAtSeconds
+                        activated:(BOOL *)activatedOut {
     // responseText is nil for the crash handler's activation-only commit
     // (activatePendingVersion): no round ran, so there is no cache to write.
     NSData *cacheData = nil;
@@ -2583,13 +2913,31 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
         cacheData = [NSJSONSerialization dataWithJSONObject:cacheEntry options:0 error:nil];
     }
     __block BOOL committed = NO;
+    __block BOOL activated = NO;
     PaktaWithStateLock(^{
         if (paktaResetGeneration.load() != generation) {
             return;
         }
+        NSString *activation = hashToActivate;
+        NSDictionary *info = hashInfoEntry[@"info"];
+        // The tvOS purged-version restore round (a round commit, not the
+        // crash handler's activation-only one): it may take over this launch
+        // only while +bundleURL still waits for it; after that the version is
+        // left to JS unless a crash is being held (JS is dead then).
+        if (responseText != nil && paktaPurgeRestoreActive.load()) {
+            if (paktaPurgeRestoreWindowOpen) {
+                if (activation != nil && info != nil) {
+                    NSMutableDictionary *marked = [info mutableCopy];
+                    marked[@"purgeRestore"] = @YES;
+                    info = marked;
+                }
+            } else if (!paktaCrashRescueActive.load()) {
+                activation = nil;
+            }
+        }
         NSUserDefaults *defaults = PaktaDefaults();
         if (hashInfoEntry != nil) {
-            NSData *infoData = [NSJSONSerialization dataWithJSONObject:hashInfoEntry[@"info"]
+            NSData *infoData = [NSJSONSerialization dataWithJSONObject:info
                                                               options:0
                                                                 error:nil];
             if (infoData != nil) {
@@ -2597,8 +2945,9 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
                              forKey:PaktaHashInfoKey(hashInfoEntry[@"hash"])];
             }
         }
-        if (hashToActivate != nil) {
-            PaktaSwitchVersionLocked(hashToActivate);
+        if (activation != nil) {
+            PaktaSwitchVersionLocked(activation);
+            activated = YES;
         }
         if (cacheData != nil) {
             [defaults setObject:[[NSString alloc] initWithData:cacheData encoding:NSUTF8StringEncoding]
@@ -2606,6 +2955,9 @@ static BOOL PaktaIsValidCheckResponse(NSString *responseText) {
         }
         committed = YES;
     });
+    if (activatedOut != NULL) {
+        *activatedOut = activated;
+    }
     return committed;
 }
 

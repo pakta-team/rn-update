@@ -409,6 +409,10 @@ export class Pakta {
   };
 
   private flushNativeConfig = () => {
+    if (this.options.nativeConfigSource === 'native') {
+      this.pendingNativeConfigJson = undefined;
+      return;
+    }
     if (this.nativeConfigSyncInFlight) {
       return;
     }
@@ -469,6 +473,10 @@ export class Pakta {
   };
 
   private syncNativeConfig = () => {
+    if (this.options.nativeConfigSource === 'native') {
+      this.pendingNativeConfigJson = undefined;
+      return;
+    }
     if (
       Platform.OS === 'web' ||
       typeof PaktaModule.syncNativeConfig !== 'function'
@@ -726,8 +734,8 @@ export class Pakta {
       let timer: unknown;
       await Promise.race([
         this.loggerPromise.promise,
-        new Promise((resolve) => {
-          timer = setTimeout(resolve, 10 * 1000);
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => resolve(), 10 * 1000);
         }),
       ]);
       // React Native/browser timers are numbers; Node's ambient types expose
@@ -964,8 +972,9 @@ export class Pakta {
   ) => {
     const resp = await fetchWithTimeout(
       this.getCheckUrl(endpoint),
-      signal ? { ...fetchPayload, signal } : fetchPayload,
-      DEFAULT_FETCH_TIMEOUT_MS
+      fetchPayload,
+      DEFAULT_FETCH_TIMEOUT_MS,
+      signal
     );
 
     if (!resp.ok) {
@@ -1540,7 +1549,7 @@ export class Pakta {
             (0.75 + Math.random() * 0.5)
         );
         log(`retry attempt ${attempt}/${maxRetries}, waiting ${backoffMs}ms`);
-        await new Promise((r) => setTimeout(r, backoffMs));
+        await new Promise<void>((r) => setTimeout(() => r(), backoffMs));
         errorMessages.length = 0;
         errorMessages.push(...exhaustedStrategies.values());
         lastError = undefined;

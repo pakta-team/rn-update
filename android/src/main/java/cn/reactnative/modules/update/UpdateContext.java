@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 Android Context/SharedPreferences/包信息、DownloadTask 单线程队列、patch_core 状态机 JNI 与原生检查编排器
- * [OUTPUT]: 对外提供 UpdateContext 单例、下载/切包、按启动版本身份确认成功、回滚/重置、bundle URL/hash、KV 与提交代际能力
- * [POS]: Android 更新聚合上下文和持久状态权威，协调磁盘事务、启动选择与救砖提交，桥层只通过它发起用例
+ * [OUTPUT]: 对外提供 UpdateContext 单例、下载/切包、按启动版本身份确认成功、回滚/重置、bundle URL/hash、KV 与提交代际能力；新增 synchronized setNativeConfig(String)（预检 UUID 配置、推进 nativeConfigGeneration、失效响应缓存并重置 JS 检查标记）
+ * [POS]: Android 更新聚合上下文和持久状态权威，协调磁盘事务、启动选择与救砖提交，桥层与 PaktaNativeUpdate 只通过它发起用例
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 package cn.reactnative.modules.update;
@@ -808,6 +808,41 @@ public class UpdateContext {
     }
 
     /** Sampled/compared by the native check orchestrator; see resetGeneration. */
+    /** Shared by JS and native hosts. Config replacement invalidates old native decisions. */
+    private static final java.util.concurrent.atomic.AtomicLong nativeConfigGeneration =
+        new java.util.concurrent.atomic.AtomicLong(0);
+
+    static long getNativeConfigGeneration() {
+        return nativeConfigGeneration.get();
+    }
+
+    void setNativeConfig(String config) {
+        synchronized (commitLock) {
+            boolean changed = !config.equals(sp.getString(NativeCheckOrchestrator.KEY_CONFIG, null));
+            SharedPreferences.Editor editor = sp.edit();
+            if (changed) {
+                // Also invalidate on a failed persistence attempt: an older
+                // round must not commit over uncertain configuration state.
+                resetGeneration.incrementAndGet();
+                nativeConfigGeneration.incrementAndGet();
+                editor.remove(NativeCheckOrchestrator.KEY_RESP_CACHE);
+                NativeCheckOrchestrator.markJsCheckCompleted(null);
+            }
+            // A native-only first launch needs a stable gray-release identity
+            // before JS initializes. Never replace an existing installation ID.
+            String uuid = sp.getString("uuid", null);
+            if (uuid == null || uuid.isEmpty()) {
+                editor.putString("uuid", java.util.UUID.randomUUID().toString());
+            }
+            editor.putString(NativeCheckOrchestrator.KEY_CONFIG, config);
+            // Persist even an equal value: a previous commit may have updated
+            // SharedPreferences memory but failed to write its file.
+            persistEditorOrThrow(editor, "configure native update");
+        }
+        NativeCheckOrchestrator.onConfigured(this);
+    }
+
+    // Native-decision generation: bumped by reset AND configuration replacement.
     static long getResetGeneration() {
         return resetGeneration.get();
     }

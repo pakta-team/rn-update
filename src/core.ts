@@ -9,8 +9,8 @@ import { UpdateError } from './error';
 import i18n from './i18n';
 import { emptyModule, error, log } from './utils';
 
-// React Native 运行时提供 global，但消费端不应被迫安装 Node 类型才能解析 SDK。
-declare const global: typeof globalThis;
+// RN 0.87 自身类型不再声明 global，模块级声明可遮蔽 @types/node 而不冲突。
+declare const global: any;
 
 /* eslint-disable @react-native/no-deep-imports */
 const {
@@ -19,7 +19,7 @@ const {
 const RNVersion = `${v.major}.${v.minor}.${v.patch}`;
 const isTurboModuleEnabled =
   // https://github.com/facebook/react-native/pull/48362
-  (global as any).__turboModuleProxy || (global as any).RN$Bridgeless;
+  global.__turboModuleProxy || global.RN$Bridgeless;
 
 const isWebPlatform = Platform.OS === 'web';
 
@@ -179,7 +179,9 @@ if (!uuid) {
 export const cInfo = {
   rnu: require('../package.json').version,
   rn: RNVersion,
-  os: `${Platform.OS} ${Platform.Version}`,
+  // tvOS reports Platform.OS 'ios'; label it apart so the server can bucket
+  // tvOS devices separately. Must match PaktaOsName in RCTPakta.mm.
+  os: `${Platform.OS === 'ios' && Platform.isTV ? 'tvos' : Platform.OS} ${Platform.Version}`,
   uuid,
 };
 

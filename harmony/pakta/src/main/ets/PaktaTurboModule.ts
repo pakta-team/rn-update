@@ -282,7 +282,7 @@ export class PaktaTurboModule extends UITurboModule {
       );
     }
     try {
-      await this.context.setKv(KEY_CONFIG, config);
+      await this.context.setNativeConfig(config);
     } catch (error) {
       throw toUpdateError(error, ERROR_FILE_OPERATION_FAILED);
     }

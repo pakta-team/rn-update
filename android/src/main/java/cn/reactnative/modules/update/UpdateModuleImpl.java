@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 UpdateContext、ReadableMap/Promise、UpdateModuleSupport、StateSerialRunner、UiThreadRunner 与 ReactReloadManager
- * [OUTPUT]: 对外提供新旧架构共用的下载、安装、切包、重载、版本绑定成功确认、重置、配置、缓存和本地版本信息静态命令
+ * [INPUT]: 依赖 UpdateContext（含 setNativeConfig 代际推进）、ReadableMap/Promise、UpdateModuleSupport、StateSerialRunner、UiThreadRunner 与 ReactReloadManager
+ * [OUTPUT]: 对外提供新旧架构共用的下载、安装、切包、重载、版本绑定成功确认、重置、配置（syncNativeConfig 经 setNativeConfig 参与代际失效）、缓存和本地版本信息静态命令
  * [POS]: Android 原生模块应用服务门面，统一参数提取、线程归属与稳定错误码，防止两套桥实现行为漂移
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -345,7 +345,7 @@ public class UpdateModuleImpl {
         StateSerialRunner.run(promise, ErrorCodes.FILE_OPERATION_FAILED, "syncNativeConfig", new StateSerialRunner.Operation() {
             @Override
             public void run() {
-                updateContext.setKv(NativeCheckOrchestrator.KEY_CONFIG, config);
+                updateContext.setNativeConfig(config);
                 promise.resolve(true);
             }
         });

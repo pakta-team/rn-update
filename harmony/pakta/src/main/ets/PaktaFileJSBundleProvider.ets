@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 RNOH JSBundleProvider、UIAbilityContext、file system 和 UpdateContext 的 bundle 选择
- * [OUTPUT]: 对外提供 PaktaFileJSBundleProvider.getURL/getBundle/getAppKeys
- * [POS]: Harmony bundle 生命周期适配器，负责把已选版本文件交给 RNOH，不执行下载或切包
+ * [INPUT]: 依赖 RNOH JSBundleProvider、UIAbilityContext、file system、UpdateContext 的 bundle 选择与 NativeCheckOrchestrator.checkAndUpdateNative
+ * [OUTPUT]: 对外提供 PaktaFileJSBundleProvider.getURL/getBundle/getAppKeys，以及无桥宿主 API configure(options)（经 NativeUpdateConfig 归一化落库）与 checkAndUpdate()（返回 NativeUpdateResult）
+ * [POS]: Harmony bundle 生命周期适配器兼无桥宿主门面，负责把已选版本文件交给 RNOH，不执行下载或切包
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import {
@@ -12,6 +12,10 @@ import {
 import common from '@ohos.app.ability.common';
 import fs from '@ohos.file.fs';
 import { UpdateContext } from './UpdateContext';
+import { checkAndUpdateNative } from './NativeCheckOrchestrator';
+import type { NativeUpdateResult } from './NativeUpdateResult';
+import { normalizeNativeUpdateConfig } from './NativeUpdateConfig';
+import type { NativeUpdateConfig } from './NativeUpdateConfig';
 
 export class PaktaFileJSBundleProvider extends JSBundleProvider {
   private updateContext: UpdateContext;
@@ -47,6 +51,17 @@ export class PaktaFileJSBundleProvider extends JSBundleProvider {
         ],
       });
     }
+  }
+
+  /** Configure before normal bundle resolution; no JS or network work is required. */
+  async configure(options: NativeUpdateConfig): Promise<void> {
+    const config = normalizeNativeUpdateConfig(options);
+    await this.updateContext.setNativeConfig(config);
+  }
+
+  /** Call after the host's real bundle resolution; never resolves it again. */
+  checkAndUpdate(): Promise<NativeUpdateResult> {
+    return checkAndUpdateNative(this.updateContext);
   }
 
   getAppKeys(): string[] {

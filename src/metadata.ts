@@ -55,9 +55,12 @@ export interface UpdateMetadata {
   /**
    * How the running version got activated when not by the JS flow:
    * 'forceBoot' — the server's per-version override applied by the native
-   * cold-start check; 'crashRescue' — activated by the crash-time rescue.
+   * cold-start check; 'crashRescue' — activated by the crash-time rescue;
+   * 'purgeRestore' — reinstalled at launch after tvOS purged the cache.
+   * Several can apply to one activation (a purge restore of a forceBoot
+   * version); this reports the highest-priority one, in the order listed.
    */
-  rescueSource: 'forceBoot' | 'crashRescue' | null;
+  rescueSource: 'forceBoot' | 'crashRescue' | 'purgeRestore' | null;
   /** Stable per-install client id (gray-release bucketing key). */
   uuid: string;
   os: string;
@@ -84,7 +87,9 @@ export function getUpdateMetadata(): UpdateMetadata {
       ? 'forceBoot'
       : info.crashRescue
         ? 'crashRescue'
-        : null,
+        : info.purgeRestore
+          ? 'purgeRestore'
+          : null,
     uuid: cInfo.uuid,
     os: cInfo.os,
   };

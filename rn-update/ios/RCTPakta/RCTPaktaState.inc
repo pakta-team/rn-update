@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖主编译单元的 Foundation/dispatch、原子与状态锁，以及 state_core 的持久化状态转换
+ * [OUTPUT]: 提供内部下载去重/回调登记、状态锁与 defaults 投影/选择性清理，不增加宿主 API
+ * [POS]: RCTPakta.mm 的进程状态所有者；Installer 共享下载登记，Launch/RoundEngine 共享代际与原子状态提交
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 typedef NS_ENUM(NSInteger, PaktaType) {
     PaktaTypeFullDownload = 1,
     PaktaTypePatchFromPackage = 2,

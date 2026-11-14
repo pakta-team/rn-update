@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖主编译单元的桥/下载类型、Foundation/dispatch、原子变量及共享状态/配置核
+ * [OUTPUT]: 提供内部方法声明、单进程轮次/恢复窗口状态、崩溃救援处理和原始 bundle hash 缓存
+ * [POS]: RCTPakta.mm 的私有协作契约与进程级门闩；连接 Launch/Orchestrator/Installer，不扩展公共头
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 @interface RCTPakta ()
 - (void)downloadUpdate:(PaktaType)type
                options:(NSDictionary *)options

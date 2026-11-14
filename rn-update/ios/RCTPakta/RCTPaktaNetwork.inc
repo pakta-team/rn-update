@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Foundation NSURLSession/dispatch；tvOS Release 另依赖 Network 路径监视与内核进程启动时间
+ * [OUTPUT]: 提供禁止 HTTPS 降级的限时 JSON 请求，以及 tvOS 已耗进程时间和最多0.5秒的网络预检
+ * [POS]: RCTPakta.mm 的原生检查 IO 边界；RoundEngine 提供请求/时限，Orchestrator 消费启动预检，不拥有重试策略
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #if TARGET_OS_TV && !DEBUG
 #import <Network/Network.h>
 #include <sys/sysctl.h>

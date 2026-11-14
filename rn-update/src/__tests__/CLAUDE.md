@@ -26,8 +26,8 @@ i18n.test.ts: 语言选择、回退与插值回归；保证无外部运行时的
 isInRollout.test.ts: 灰度哈希与桶命中回归；锁定跨端 rollout 的确定性
 metadata.test.ts: 崩溃元数据回归；验证 getUpdateMetadata 聚合、rescueSource 归类与 tag 投影
 nativeBindings.test.ts: T09 真实生成器/parity 回归，临时副本验证 19 方法/16 Promise、幂等与只读检查、签名/委托/方法表漂移及不支持 AST 拒绝，不装载原生运行时
-nativeConfiguration.test.ts: 无桥配置回归；真实Harmony适配器VM经nativeConfigHost调用共享核，验证fixed-host白名单、默认/错误、等价/取消及真实UpdateContext落库幂等；JS归属加载真实client职责模块，不冒充三端原生运行
-nativeConfigHost.ts: 配置专项C++子进程适配器，每进程首次编译生产共享核及config_host，Windows经Ubuntu WSL执行；仅传输JSON和编译失败，不实现配置规则
+nativeConfiguration.test.ts: 无桥配置回归；30秒准备钩子预编译真实共享核后按默认预算断言，Harmony适配器VM验证fixed-host白名单、默认/错误、等价/取消及UpdateContext落库幂等；不冒充三端原生运行
+nativeConfigHost.ts: 配置专项C++子进程适配器，套件准备阶段触发每进程首次编译生产共享核及config_host，Windows经Ubuntu WSL执行；仅传输JSON和编译失败，不实现配置规则
 nativeHostApi.test.ts: VM 隔离运行真实 Harmony 编排器/执行器，验证状态映射、并发单飞、独立等待/默认期限、计时器释放与超时后双代际零提交；配置核/网络 IO 为替身
 nativeUpdateRound.test.ts: 单飞门回归；验证并发共享、重入前发布、失败轮复用、意外拒绝不重启与下载/激活分离
 packageTypes.test.ts: T10 发包契约回归；验证声明/运行入口分离、Codegen 仍用 src、旧声明清理与两次编译确定性；tarball 消费另见 scripts/check-package-types.js

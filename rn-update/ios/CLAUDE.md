@@ -9,6 +9,7 @@ Expo/: `ExpoPaktaModule.swift` 暴露 Expo Modules API，`ExpoPaktaReactDelegate
 RCTPakta/: 单编译单元包含 Launch/State/Installer/Orchestrator 内部片段，共享 StepRound 唯一执行器；保留本地锁与 tvOS 窗口，Downloader 独立负责网络字节落盘，详见 scripts/apple-round-map.md
 CLAUDE.md: iOS 原生适配层的职责、成员与依赖方向地图
 ImportReact.h: 屏蔽 React/React-Core 头路径差异的兼容入口
+PrivacyInfo.xcprivacy: Apple required-reason API 隐私清单，由 Podspec 的 PaktaPrivacy resource bundle 交付
 pakta_build_time.txt: pod 构建阶段写入的 UUID 资源，用于识别二进制包版本（非时间戳）
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

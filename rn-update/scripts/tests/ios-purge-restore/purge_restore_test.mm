@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 Foundation/dispatch/os_lock、cpp/patch_core 头与构建期从 RCTPakta.mm 提取的四个 .inc；TestDefaults NSObject 假体与注入的 TestLaunchWait/TestCompletionSignal/TestLaunchDeadline 缝隙
+ * [INPUT]: 依赖 Foundation/dispatch/os_lock、cpp/patch_core 头与现提生产状态/渠道/清理方法；TestDefaults、固定测试渠道与等待/信号/截止缝隙仅提供 IO
  * [OUTPUT]: 提供五类顺序断言（late_commit/commit_before_signal/reset_wins/commit_wins/complete_in_time）与 defaults_isolation 隔离断言，waitBudget 锁 12s
  * [POS]: ios-purge-restore 的 Foundation-only 测试宿主，编译未修改的生产方法体（tvOS 宏替换限于本 TU）；只供应 IO，不复制第二套状态机
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -170,6 +170,7 @@ Status CleanupOldEntries(const std::string&, const std::vector<std::string>&,
 + (NSURL *)binaryBundleURL;
 + (NSString *)packageVersion;
 + (NSString *)buildTime;
++ (NSString *)channel;
 + (NSString *)downloadDir;
 - (void)resetToPackagedBundle:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject;
 @end
@@ -276,6 +277,7 @@ static dispatch_time_t TestLaunchDeadline(dispatch_time_t when, int64_t delta) {
 + (NSURL *)binaryBundleURL { return [NSURL fileURLWithPath:[root stringByAppendingPathComponent:@"packaged.bundle"]]; }
 + (NSString *)packageVersion { return @"1.0"; }
 + (NSString *)buildTime { return @"123"; }
++ (NSString *)channel { return @"test"; }
 + (NSString *)downloadDir { return [root stringByAppendingPathComponent:@"updates"]; }
 #include "pakta.inc"
 @end

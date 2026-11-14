@@ -80,7 +80,12 @@ test('TEMP generation consumes one local tarball and rewrites both resolvers', (
     JSON.parse(read('package.json')).dependencies['rn-update'],
     'file:./rn-update-candidate.tgz'
   );
-  assert(!fs.existsSync(path.join(root, 'tsconfig.node.json')));
+  const nodeConfig = JSON.parse(read('tsconfig.node.json'));
+  assert.equal(nodeConfig.compilerOptions.module, 'Node16');
+  assert(
+    nodeConfig.include.includes('scripts/prepare-local-update-artifacts.ts')
+  );
+  assert(!JSON.parse(read('tsconfig.json')).compilerOptions.paths);
   for (const config of ['metro.config.js', 'react-native.config.js']) {
     assert(
       read(config).includes("path.join(__dirname, 'node_modules', 'rn-update')")

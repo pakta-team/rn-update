@@ -7,14 +7,14 @@ CI 编排层。YAML 工作流把 npm/bun 校验、Android/iOS/Harmony E2E、发�
 
 ci-failure-email.yml: 常规分支失败 run 的 issue 通知与恢复关闭；codex/verify- 验证分支不创建、评论或关闭 issue
 cli.yml: master/main/codex验证分支 push 与 CLI 相关 PR 执行静态/单测、精确 Node 18.17 smoke、固定四组 Hermes 编译器与夹具 Hash 验证及 seeded fuzz；接线不代表远端已通过
-e2e_android.yml: 先重建四 ABI SO 并发布 SHA256SUMS，再由 Android Detox 与 native-check 设备矩阵下载校验同轮产物
+e2e_android.yml: 先重建四 ABI SO 并发布 SHA256SUMS，设备矩阵下载校验同轮产物；RN077 先以同轮 SO/声明生成显式 tgz，再由生成器与构建前后守卫绑定候选及旧架构，不用源码链接覆盖候选
 e2e_harmony.yml: Harmony HAP 构建、安装与 hdc 测试
 e2e_ios.yml: iOS 模拟器 core/native 两组更新链路；CLI 输入也触发，Homebrew/ccache/Metro 仅受信 master/main push 的 core 保存 UTC 每日快照，PR/native 只读；已编译 app 保留原生输入精确 key
 expo_build.yml: Expo57/RN0.86.3 Android/iOS Release 源码消费编译；隔离本地 SDK 并断言依赖归宿主，prebuild 后编译 Kotlin/Swift/共享核，Apple 显式确认 Expo subspec、bundleURL flag 与 Delegate 注册；不代表设备更新或发布候选
 lint.yml: master/main 的 PR/push 与 codex验证分支 push 执行 SDK Biome、TypeScript、Harmony 声明和 Native Spec 一致性检查
 publish.yml: 四ABI重建后、上传前以Node24执行禁串/Android verifier正负控；同步Release版本后重建分支显式release构建HAR、校验并以--har执行BuildProfile及新增禁串专项；两分支release:prepare各仅pack一次，同一tgz清单/声明消费后发布前核对SHA-256，保留OIDC/contents与provenance/public/beta权限；复用HAR仍显式校验前版版本，不硬套当前版本专项
-test.yml: master/main的PR/push与codex验证分支push递归检出；Android job及package-check执行禁串/Android verifier测试，Android配置JDK17/SDK36/C++编译器，Gradle testDebugUnitTest强制重跑并触发真实testInstallHost；Harmony容器从当前源码release构建后执行既有HAR及新增禁串--har专项，package-check依赖构建job、下载同轮release-har后复验，缺产物失败；保留候选/闭包/test:pack、Ruby规格、Linux Apple回放与macOS Foundation分层
-scripts/: CI 使用的 emulator、Firebase 与 callable function 夹具
+test.yml: master/main的PR/push与codex验证分支push递归检出；Android真实JNI/JVM、同轮ReleaseHAR→包消费、共享核/Apple源码/原始ObjC++语法及MacFoundation分层；独立macos-26以RN-tvos0.85.3-3实体消费当前SDK，CocoaPods后Release编译并最终链接tvOS应用，检查RCTPakta符号/Network，不以Podspec测试代替平台编译
+scripts/: CI 使用的 emulator、Firebase、callable function 与隔离 tvOS 原生应用生成夹具
 
 本地2026-11-14强制Gradle执行51项真实安装JNI与46项JVM，均通过；Release HAR重建后真实正负控5/5、0 skip，package门禁Node17/17与HAR5/5通过。旧本地HAR因源码漂移确实失败，验证后恢复原HAR与BuildProfile/版本源文件；干净CI必须先构建并取artifact，不假定忽略产物存在。历史prepack/tgz结论及本轮摘要见 ../../rn-update/scripts/CLAUDE.md；Actions未实跑，不等同设备或发布候选验收，未发布，原permissions不变。
 
@@ -37,5 +37,15 @@ GitHub API 实查 `pakta-team/rn-update` 默认 main，main/master 当时均为 
 六份非发布 workflow（test/lint/cli/Android/iOS/Expo）允许 `codex/verify-*` push，用分支内配置直接执行，绕开新 workflow 尚不存在默认分支时无法 dispatch 的限制。快照只需 SDK、CLI、必需根 .github 与两子模块声明，不依赖 server/admin/legal；发布仍仅由 release published 触发。通知的创建和恢复关闭两 job 均拒绝 `codex/verify-` 分支，不产生第三方通知。Harmony 设备保留真实自托管前提，Windows 需复用本机短路径/DevEco/签名及真实差分步骤，不伪装为 macOS 或用 HAR 检查替代设备。
 
 本轮 `actionlint v1.7.12` 对七份变更 workflow 返回0，86段 run 经 WSL `bash -n` 通过；分支匹配、无 push 发布及两个通知 guard 已校验。还未推送输入、dispatch 或执行本轮远端 run，后续必须以实际 SHA、run/job URL 与产物更新状态。
+
+## 2026-11-14 真实 Actions 首轮补缺
+
+安全 orphan 验证提交 `d170c04522c2a5ebe059c729b04be04bf3e88d7a` 已推 `codex/verify-upstream-sync-20261114`，仅含公开 SDK/CLI/CI 和两份子模块引用，没有本地 monorepo 历史。首轮 lint 与 CLI 七个 job 通过；其它平台存在真实失败，不能沿用历史发布结果。Android SDK setup 旧默认包 `tools` 已在仓库失效，test/Expo 入口显式安装 `platform-tools`；HAR 容器已真实完成构建，但随后验证缺少 Python，验证前补安装 Python3；flow replay 改显式 `bash`，兼容 Windows 检出后脚本的普通文件模式。Mac Foundation 提取缺口及 JDK 25 native-access 修复见 SDK 测试地图。其余失败继续逐项修复，首轮原始 jobs/log 保存在 `TEMP/pakta-platform-validation-20261114`，本段不称矩阵通过。
+
+## 2026-11-15 Apple 编译缺陷与平台门禁补全
+
+首轮 Expo iOS 在 Xcode26.4.1 真正编译 SDK 时发现 ObjC ivar 不能含 C++ brace initializer；私有 holder 修复及原始 Objective-C++ 语法正负控见 SDK Apple 地图，Linux源码job显式安装clang。RN077首轮因未提供候选而失败，现先下载/验证同轮四ABI，生成声明后只pack一个Android用途tgz，写入RNU_SDK_TARBALL/SHA256供生成器安装；后续不再用checkout链接替换候选，构建前及Release后守卫均执行，并保存候选身份。这不是跨平台发布候选或HAR准入。
+
+tvOS新增真实macos-26/Xcode26.4 job：固定RN-tvos0.85.3-3/React19.2.3，独立应用下实体隔离SDK并核对源码/RN归属，生成CocoaPods/Xcode tvOS应用，经arm64 appletvsimulator Release编译、最终链接，核对RCTPakta类符号及Network.framework。它不执行tvOS设备更新；本地首轮安装696包暴露file依赖把SDK开发RN0.73装进嵌套目录，归属守卫确实失败；隔离副本仅删devDependencies后重新安装413包、归属与关键源码守卫、真实RCTPaktaSpec代码生成及预期header路径通过，未删运行/peer依赖。实际Xcode tvOS application/shared scheme生成、Ruby/Node语法及64段Bash、三份workflow actionlint通过，全部Apple Python19/19（含安装131核检查/3删源/10guard/2归零/2编译负控）通过。Mac全量结果须由新SHA远端run另证，不将本地生成成功记作平台编译成功。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

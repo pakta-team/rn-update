@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖主编译单元的 install_record/archive_limits、Foundation、SSZipArchive 与下载空间探测
  * [OUTPUT]: 提供安装记录投影/完整性及激活检查、staging/摘要表和按实际归档长度初始化的解压守卫
- * [POS]: RCTPakta.mm 的共享安装边界片段；保留零字节 marker，累计裁决归 C++，不负责状态提交
+ * [POS]: RCTPakta.mm 的共享安装边界片段；私有 C++ 容器承担 ObjC ivar 默认构造，累计裁决仍归共享核
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #include "../../cpp/patch_core/patch_manifest.h"
@@ -90,8 +90,14 @@ static NSError *PaktaEnsureFreeSpace(NSString *path, long long bytesToWrite) {
 // 2.x contract the podspec pins), and the completion handler turns the
 // recorded violation into a hard PATCH_FAILED; the caller then discards the
 // staging directory.
+// Objective-C ivar 不支持成员初始化器；默认构造只属于私有 C++ 容器。
+// 实际归档分母仍由 initWithArchiveBytes 在接收任何条目前写入。
+struct PaktaUnzipEntries {
+    pakta::archive_limits::EntryAccumulator accumulator{0};
+};
+
 @interface PaktaUnzipGuard : NSObject <SSZipArchiveDelegate> {
-    pakta::archive_limits::EntryAccumulator _entries{0};
+    PaktaUnzipEntries _entries;
 }
 @property (nonatomic, copy) NSString *violation;
 - (instancetype)initWithArchiveBytes:(long long)archiveBytes;
@@ -102,7 +108,7 @@ static NSError *PaktaEnsureFreeSpace(NSString *path, long long bytesToWrite) {
 - (instancetype)initWithArchiveBytes:(long long)archiveBytes {
     self = [super init];
     if (self) {
-        _entries = pakta::archive_limits::EntryAccumulator(archiveBytes);
+        _entries.accumulator = pakta::archive_limits::EntryAccumulator(archiveBytes);
     }
     return self;
 }
@@ -121,7 +127,7 @@ static NSError *PaktaEnsureFreeSpace(NSString *path, long long bytesToWrite) {
     if (self.violation != nil) {
         return NO;
     }
-    auto status = _entries.Accept((long long)fileInfo.uncompressed_size,
+    auto status = _entries.accumulator.Accept((long long)fileInfo.uncompressed_size,
         (long long)fileInfo.compressed_size,
         ((fileInfo.external_fa >> 16) & S_IFMT) == S_IFLNK, "");
     if (!status.ok) {

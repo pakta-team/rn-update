@@ -6,7 +6,7 @@ from RCTPakta.mm on every run. Extraction fails on missing/ambiguous definitions
 strings/comments cannot affect brace matching. Only the test host supplies I/O.
 """
 
-# [INPUT]: 依赖标准库 argparse/json/pathlib/re 与 RCTPakta.mm 源码；正则分词 + 字面量掩码（保偏移保换行）驱动花括号匹配提取
+# [INPUT]: 依赖标准库 argparse/json/pathlib/re 与 RCTPakta.mm 展开的源码；提取状态、渠道身份与版本清理协作者，字面量掩码保留偏移和换行
 # [OUTPUT]: 对内提供 declaration/exported_method/method/function 提取器、mask_literals、mutate 负控改写与 generate()（生成 globals/helpers/pakta/orchestrator 四个 .inc，#line 回指源文件）与 --mutation CLI
 # [POS]: ios-purge-restore 测试宿主的提取引擎，每次运行从 RCTPakta.mm 现取现译；缺定义/歧义/括号失衡即 fail-closed，不检查入生成物
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -74,7 +74,7 @@ def declaration(source: str, name: str) -> tuple[int, str]:
 
 
 GLOBALS = [
-    'keyPaktaInfo', 'paramPackageVersion', 'paramBuildTime',
+    'keyPaktaInfo', 'paramPackageVersion', 'paramBuildTime', 'keyBinaryChannel',
     'legacyParamPackageVersion', 'legacyParamBuildTime', 'paramLastVersion',
     'paramCurrentVersion', 'paramIsFirstTime', 'paramIsFirstLoadOk', 'keyUuid',
     'keyHashInfo', 'keyFirstLoadMarked', 'keyRolledBackMarked',
@@ -87,7 +87,7 @@ GLOBALS = [
 ]
 HELPERS = [
     'PaktaWithStateLock', 'PaktaToStdString', 'PaktaFromStdString',
-    'PaktaSetNullableString', 'PaktaHashInfoKey', 'PaktaBinaryIdentityValue',
+    'PaktaSetNullableString', 'PaktaHashInfoKey', 'PaktaClearVersionScopedState', 'PaktaBinaryIdentityValue',
     'PaktaStateFromDefaults', 'PaktaApplyStateToDefaults', 'PaktaSwitchVersionLocked',
     'PaktaReadInstallRecord', 'PaktaHasCompletedVersionAtPath',
     'PaktaVerifyInstallForActivation',

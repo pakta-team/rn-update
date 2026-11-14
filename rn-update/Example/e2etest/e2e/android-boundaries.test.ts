@@ -4,6 +4,7 @@
  * [POS]: E2E 失败边界叶节点；服务端禁 full fallback，因此不能靠全量包掩盖补丁失败，不模拟 SDK 决策
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
+import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { by, device, element, waitFor } from 'detox';
@@ -44,22 +45,13 @@ android('Android download failure boundaries', () => {
     const manifest = JSON.parse(
       readFileSync(path.resolve('.e2e-artifacts/android/manifest.json'), 'utf8')
     );
-    expect(manifest.fullFallback).toBe(false);
-    await device.launchApp({ ...launchOptions(), delete: true });
+    assert.equal(manifest.fullFallback, false);
   });
 
   beforeEach(async () => {
     writeFileSync(patchPath, patch);
-    await device.launchApp(launchOptions());
-    await device.setURLBlacklist([`.*:${LOCAL_UPDATE_PORT}.*`]);
-    await waitFor(element(by.id('reset-to-packaged')))
-      .toBeVisible()
-      .withTimeout(30000);
-    await element(by.id('reset-to-packaged')).tap();
-    await waitFor(element(by.id('last-event')))
-      .toHaveText('lastEvent: resetDone')
-      .withTimeout(15000);
-    await device.launchApp(launchOptions());
+    // 故障夹具逐例隔离；reset 的生命周期由 local-merge 套件独立覆盖。
+    await device.launchApp({ ...launchOptions(), delete: true });
     await device.setURLBlacklist([`.*:${LOCAL_UPDATE_PORT}.*`]);
     await label(LOCAL_UPDATE_LABELS.base);
     await currentHash('');
@@ -83,7 +75,7 @@ android('Android download failure boundaries', () => {
         else unlinkSync(patchPath);
         await element(by.id('check-update')).tap();
         await waitFor(element(by.id('last-event')))
-          .toHaveText('lastEvent: errorDownload')
+          .toHaveText('lastEvent: errorUpdate')
           .withTimeout(120000);
         await label(LOCAL_UPDATE_LABELS.full);
         await currentHash(LOCAL_UPDATE_HASHES.full);

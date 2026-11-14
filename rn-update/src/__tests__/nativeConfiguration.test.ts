@@ -1,13 +1,17 @@
 /**
- * [INPUT]: 依赖 bun:test、node:fs/node:vm 与 Bun.Transpiler，以 VM 隔离运行真实 UpdateContext.ts（preferences 假体）与三端归一化器
+ * [INPUT]: 依赖 bun:test、VM 与真实配置共享核，准备钩子先编译宿主，再隔离运行 Harmony 适配器和 UpdateContext
  * [OUTPUT]: 提供 normalizeNativeUpdateConfig 与 setNativeConfig 落库/代际失效/重复幂等的无桥配置回归断言
  * [POS]: __tests__ 的无桥配置套件，锁定三端镜像归一化器与 JS 侧配置持久化之间的契约
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-import { describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { configCore, normalizeConfiguration } from './nativeConfigHost';
+
+beforeAll(() => {
+  configCore('normalize', ['{"appKey":"fixture"}']);
+}, 30000);
 
 type NativeUpdateConfig = Record<string, unknown>;
 

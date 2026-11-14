@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖宿主 sh/C++17/Node headers，构建真实 NAPI 与共享核后驱动 ArkTS 适配器
+ * [OUTPUT]: 提供安装记录、归档、配置和轮次的真实宿主文件 IO 回归
+ * [POS]: Harmony 安装桥的宿主集成测试；显式 shell 启动构建，不依赖脚本执行位，不代表设备运行
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';

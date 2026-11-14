@@ -11,6 +11,8 @@
     "test:e2e:ios": "node scripts/run-detox.js ios test --configuration ios.sim.release",
     "test:e2e:android": "node scripts/run-detox.js android test --configuration android.emu.release --headless --record-logs all",
     "test:e2e:harmony": "jest --config e2e/harmony.jest.config.js",
+    "harmony:e2e": "node scripts/run-harmony-e2e.js",
+    "test:harmony-orchestrator": "node --test scripts/harmony-e2e.test.js",
     "lint": "biome check .",
     "apk": "node scripts/run-gradle.js assembleRelease",
     "apk:local-device": "node scripts/build-local-device-android.js",
@@ -22,7 +24,7 @@
   "dependencies": {
     "react": "19.2.3",
     "react-native": "0.85.2",
-    "rn-update": "1.0.0"
+    "rn-update": "1.1.0"
   },
   "devDependencies": {
     "@babel/core": "^7.27.3",

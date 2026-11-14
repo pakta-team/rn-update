@@ -11,7 +11,7 @@ RCTPaktaState.inc: 状态锁/代际、defaults 转换、选择性清理与进程
 RCTPaktaInternal.inc: 私有方法声明、进程轮次门闩、崩溃救援处理与 bundle hash 缓存，不暴露新宿主 API
 RCTPaktaLaunch.inc: bundleURL 选择、回滚、configure 与无桥检查入口，保持原 tvOS 重解析路径
 RCTPaktaIdentity.inc: 下载目录、包版本、opaque UUID buildTime、Info.plist 固定 channel
-RCTPaktaInstallRecord.inc: 安装记录读取/激活摘要、空间与解压守卫，保留历史零字节 marker
+RCTPaktaInstallRecord.inc: 安装记录读取/激活摘要、空间与解压守卫；私有 C++ holder 默认构造 ObjC ivar，init 写真实归档长度，保留历史零字节 marker
 RCTPaktaInstaller.inc: full/diff/pdiff 下载安装链，复用原文件队列与共享去重登记
 RCTPaktaInstallerFiles.inc: 创建目录、解压及旧文件清理，保持运行版本保护
 RCTPaktaNetwork.inc: 原生检查 HTTP IO/HTTPS 降级拦截与共享命令超时；tvOS Release 提供内核进程耗时和最多0.5秒网络路径预检
@@ -38,5 +38,7 @@ T16 预检续批：网络明确离线或剩余不足2秒不消耗轮次；网络
 T11 Apple共享安装接入：InstallRecord片段委托Read/IsComplete/CheckActivation，Installer委托原始manifest/HBC解析、Seal/Promote，解压委托累计器与目录审计。公共switch在锁外取摘要快照，锁内复核reset代际和current/last祖父身份；commit在锁外预检，窗口裁决后锁内Unchanged先于所有写入。既有tvOS/legacy/旧布局不变；无Mac原生编译结论。此前54项纯替身reader测试由真实核131检查、Podspec源闭包链接/3删源负控及生产commit提取测试替代，不能按计数直接比较。新增及变更文件契约集中见 ../../scripts/install-map.md 的Apple增量，不增加源码注释。
 
 本次文档核对补共享轮次/安装片段的必需 L3，并修正 NativeConfig 委托事实；以上“不增加源码注释”为历史批次范围，不再作为当前头部缺失的豁免。不改算法、配置、测试或二进制，不重跑历史测试，不宣称 Apple 原生构建通过。
+
+2026-11-15 真实 Xcode 26.4.1 首轮发现 ObjC ivar 不允许 `_entries{0}` 初始化器，且共享 EntryAccumulator 无默认构造。修复由私有 PaktaUnzipEntries 容器承接零值默认构造，initWithArchiveBytes 仍覆盖实际分母，解压 Accept 路径及共享核不变；新增原始 ObjC++ 声明 clang 语法正控与两条编译负控，原真实核归档行为继续验证。一次审查全部自有Apple源头与L2后，补State/Identity/Internal/Launch/Network/Orchestrator六片段的缺失L3，均只改注释；其余头契约与成员地图相符，父级补隐私清单成员。8项提取器及3项拆分守卫通过。此局部修复不等于 Xcode 全量通过，远端重跑另记。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

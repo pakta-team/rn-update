@@ -73,6 +73,8 @@ jobs:
       - name: Set up Android SDK
         if: matrix.platform == 'android'
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
       - name: Install Expo example dependencies
         run: bun install --frozen-lockfile
       - name: Link the current SDK without its development dependencies

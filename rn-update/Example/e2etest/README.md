@@ -2,6 +2,8 @@
 
 `e2etest` 是专门给 Detox 用的 React Native example，不承担手工演示职责。
 
+依赖锁使用官方 `rn-update@1.1.0` 的真实 registry 摘要，保持冻结安装校验。它只提供包名和安装依赖；Metro 将 SDK JS 与版本元数据固定到本仓库，RN CLI 将 Android/iOS 原生根固定到同一工作树。构建前 `node scripts/assert-local-sdk.js` 会同时验证这些边界及宿主 React/RN 单例，不能把 registry 包安装成功当成本轮候选验证。
+
 验证链路固定为：
 
 - 本地 `rn-update-cli` 生成全量包、`diff` 和 Android `pdiff`
@@ -45,6 +47,8 @@ npm run build:so
 
 HarmonyOS 需要先在已连接的设备/模拟器上构建并安装基座 HAP，再运行独立的
 `hdc + uitest` runner：
+
+Windows 与临时 runner 统一使用 [Harmony 分阶段入口](scripts/harmony-e2e-map.md)：显式候选 tgz/HAR 摘要 → `stage` → 样例冻结安装 → `sync/prepare/base/build/diff/install/test`。入口固定双 ABI Release、显式 HDC 目标及真实 `fullFallback=false` 门禁，构建/安装摘要避免旧 HAP 混入。原 Bash 构建入口仅保留既有 macOS 工作流。
 
 ```sh
 npm run build:harmony-e2e

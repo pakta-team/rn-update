@@ -5,7 +5,7 @@
 
 `RNU_SDK_TARBALL` → 共享 package-candidate 身份/可选摘要检查 → CLI 15.0.1 的 RN 0.77.3 模板 → 工程内 rn-update-candidate.tgz → 安装树 → Metro/CLI 同根 → Release → 启动旧桥断言。
 
-生成器保留 React 18.3.1、RN 0.77.3、CLI 15.0.1、Detox 20.51.4 和原有类型依赖约束；不升级生产依赖或改锁。复制清单删除不存在的 tsconfig.node.json，显式复制并重定位 react-native.config.js 与 Metro。不存在的深层目标父目录先创建。工作区已有工程则拒绝覆盖，不清空 TEMP 或删除证据。
+生成器保留 React 18.3.1、RN 0.77.3、CLI 15.0.1、Detox 20.51.4 和原有类型依赖约束；不升级生产依赖或改锁。复制 JS 与 Node 两份 TypeScript 配置，移除主宿主指向仓库源码的类型别名，使类型解析与 Metro/CLI 一同归安装树。`tsconfig.node.json` 是 prepare/global hooks 的必需输入，不能遗漏；历史删除复制项的记录不代表该入口可用。不存在的深层目标父目录先创建。工作区已有工程则拒绝覆盖，不清空 TEMP 或删除证据。
 
 `assert-rn077-oldarch.js` 检查 tgz SHA-256、安装版本和关键 JS/旧架构 Java 字节、RN077 精确版本及 JS/native 路径一致性；Release 模式要求宿主/SDK 两份 BuildConfig 都为 false 且 APK 存在。它不宣称全归档逐文件校验或运行时通过。
 
@@ -21,6 +21,8 @@
 
 ## 验收边界
 
-本轮生成器 Release 不等于新 APK 设备通过；设备 smoke 绑定旧 TEMP APK。两轮均复用既有 SDK SO，不重编 C++；当前 tgz 来自原 TEMP `npm pack --ignore-scripts`，不具备完整 prepack/release:prepare 发布闸门背书。未执行完整 Detox、OTA 下载/切包/救援、真实 diff/pdiff、全 ABI 设备、iOS 或 Actions，不提交、不发布。
+2026-11-14至15日后续设备轮使用新的 `989603f4…` 正常发布准备候选，独立重生 HBC96 四 PPK 与真实三补丁。新 Release APK `837eb3e4…` 与设备拉回摘要一致；core 3套/5项、native 1套/1项全部通过，覆盖旧桥实际 full/diff/pdiff/v2-track 两策略与补丁失败保持/重启。此前历史 tgz/旧 smoke 不与本轮合并，完整输入身份、临时依赖镜像与未验边界见 [设备矩阵](../e2e/ANDROID_DEVICE_MATRIX.md)。
+
+上节历史生成器 Release 不等于当轮新 APK 设备通过；历史设备 smoke 绑定旧 TEMP APK。历史两轮均复用既有 SDK SO、不重编 C++，当轮 tgz 来自原 TEMP `npm pack --ignore-scripts`，不具备完整 prepack/release:prepare 发布闸门背书。后续矩阵补齐了当前候选的完整 Detox 与真实差分，但仍未证明全 ABI/其他平台或真正坏 JS 救援；不提交、不发布。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

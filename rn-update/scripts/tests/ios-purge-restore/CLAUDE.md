@@ -13,9 +13,9 @@ test_extract.py: 提取器守护测试；8 例锁定偏移保真、原型跳过�
 test_apple_split.py: 展开真实生产片段，校验未改守卫/启动方法摘要、唯一包含/执行器及800行和Podspec内外边界
 apple-characterization.json: 拆分前生产翻译单元和关键方法 SHA-256，只作旧行为基线，不用新轮次覆盖旧摘要
 test_round.py: 严格提取生产命令循环并以 C++17/Werror 链接真实核心回放；IO/finish 受限替换，负控关闭救援标记必须失败，不是 Apple 编译
-test_install_link.py: 从Podspec读取全部共享C++源并真实链接安装测试，131检查和三个删源链接负控；另校验Apple guard实际长度接线，提取累计器初始化/Accept链接真实核并运行10项检查、两组归零行为突变；仅Linux宿主，不模拟CocoaPods/Xcode
+test_install_link.py: 从Podspec读取全部共享C++源并真实链接安装测试、三个删源链接负控；guard原始ObjC++声明/初始化经clang语法检查及两条编译负控，实际长度接线/Accept链接真实核运行10项行为及两组归零突变，不模拟Foundation/CocoaPods/Xcode
 test_launch_preflight.py: 现提生产进程耗时/网络路径/恢复方法与预算常量，受限转换后编译14场景及4行为突变；系统API/dispatch/提交协作者为替身，不证明Foundation并发
-test_configuration.py: 现提Apple配置门禁/等价/取消表达式链接真实共享核并运行三组行为突变；另编译真实配置JNI以-Xcheck:jni锁定Unicode和非法配置异常前缀，不冒充Foundation或ART
+test_configuration.py: 现提Apple配置门禁/等价/取消表达式链接真实共享核并运行三组行为突变；配置JNI显式允许本机native access并以-Xcheck:jni锁定Unicode和非法配置异常前缀，拒绝真正JNI警告，不冒充Foundation或ART
 
 ## 验证边界
 
@@ -34,5 +34,9 @@ T11 Apple增量：Foundation构建入口补链接install_record.cpp/flow_json.cp
 2026-11-14 Apple归档P1：生产仅给guard增加initWithArchiveBytes并传入RCTPaktaFileSize取得的实际长度，不改共享算法。先取得平台接线失败及真实C++正常单项/累计超过1MiB、100:1边界误拒证据，再修复；测试宿主原有窄化位移和链接缺口先行修正，编译错误不计行为负控。最终全目录16/16，包括guard的3组平台接线突变、10项真实核检查及2组成功编译后按预期失败的归零突变；SDK439/439、contract10/10、lint通过，Harmony SDK类型检查明确skip。输入为条目元数据，不是真实ZIP/SSZipArchive解压；Foundation/Apple工具链仍未运行。详细契约见 ../../install-map.md。
 
 2026-11-14 缓存卫生：先核实 Git 跟踪状态并将当前四份 __pycache__ 字节码及 SDK 根 .pytest_cache 四个文件逐字节备份至 TEMP/pakta-t01-recovery-20261114-115634/protected-current，再删除生成缓存；其中 extract.cpython-313.pyc 与 test_extract.cpython-313-pytest-8.4.2.pyc 原为 tracked，保留显式删除差异，不改索引。SDK .gitignore 排除 __pycache__/.pytest_cache/*.pyc；测试入口继续使用 -B。本次只核验恢复与缓存，不重跑算法测试，不改变既有验收结论；逐文件摘要见 TEMP 同目录 protected-current-manifest.json。
+
+2026-11-14 远程首轮补缺：真实 macOS Foundation job 编译发现宿主没有同步渠道身份与版本级清理协作者。提取器现从生产展开源码纳入 `keyBinaryChannel`、`PaktaClearVersionScopedState`，宿主只增加固定测试渠道的 IO 接口，不改生产方法体。Linux JNI job 的 JDK 25 native-access 提示通过显式 JVM 授权解决，`-Xcheck:jni` 与警告拒绝仍保留；本段仅登记修复，实际 Mac 通过需以后续 run 证明。
+
+2026-11-15 真实 Expo iOS 编译揭示旧 guard 测试转换成 C++ 后漏检 ObjC ivar 语法。新正控现取 holder、完整 @interface 与 init 原文，以 clang++ Objective-C++ 模式只做语法检查；内联 ivar 初始化器和去除 holder 默认构造两条突变必须编译失败。Linux 最小 NSObject/协议仅补语法依赖，不链接 Foundation，完整 Apple 编译仍由真实 Mac workflow 证明。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Foundation 的宿主包信息/资源与进程缓存，以及主编译单元的 RCTPakta/日志和平台宏
+ * [OUTPUT]: 实现下载根目录、原始 bundle URL、包版本、opaque buildTime 与安装包固定渠道读取
+ * [POS]: RCTPakta.mm 的二进制身份边界；Launch/Installer/RoundEngine 消费同一身份，tvOS 仅改用 Caches
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 + (NSString *)downloadDir
 {
 #if TARGET_OS_TV

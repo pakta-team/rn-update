@@ -1,3 +1,7 @@
+# [INPUT]: 依赖生产 Apple 配置表达式、共享 C++ 核与 Linux JDK，显式允许测试进程加载 JNI
+# [OUTPUT]: 验证配置门禁/等价/取消行为、Unicode JNI 与异常协议，保留 -Xcheck:jni 的警告拒绝
+# [POS]: Apple 配置契约的跨平台宿主测试，不替代 Foundation 或 ART 验证
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 import os
 from pathlib import Path
 import subprocess
@@ -121,7 +125,7 @@ class ConfigTest {
                                 native_path(ROOT / 'android/src/main/java/cn/reactnative/modules/update/NativeUpdateFlow.java'),
                                 native_path(java / 'NativeUpdateCore.java'), native_path(java / 'ConfigTest.java')])
             self.assertEqual(compile_java.returncode, 0, compile_java.stderr)
-            result = run(['java', '-Xcheck:jni', '-Dlibrary=' + library, '-cp', native_path(path),
+            result = run(['java', '--enable-native-access=ALL-UNNAMED', '-Xcheck:jni', '-Dlibrary=' + library, '-cp', native_path(path),
                           'cn.reactnative.modules.update.ConfigTest'])
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn('WARNING', result.stdout + result.stderr)

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖私有轮次门闩/恢复窗口、共享配置与状态核、State/Network/安装激活检查和 RoundEngine 执行器
+ * [OUTPUT]: 实现原生配置持久化、冷启动/无桥/崩溃救援调度、tvOS 有界恢复，以及代际/窗口保护的轮次提交
+ * [POS]: RCTPakta.mm 的原生生命周期协调者；唯一轮次交给 RoundEngine，锁外验证安装摘要后在锁内复核身份并提交
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 @implementation RCTPaktaOrchestrator
 
 + (void)persistConfiguration:(NSString *)config {

@@ -1,5 +1,5 @@
 # [INPUT]: 依赖 monorepo SDK 源码、共享核、Android/Harmony/Apple 工具链与候选校验脚本
-# [OUTPUT]: 提供 JS/JVM/JNI/C++/HAR/包消费及 Apple 源码门禁
+# [OUTPUT]: 提供 JS/JVM/JNI/C++/HAR/包消费、Apple 源码与真正 tvOS 应用编译/链接门禁
 # [POS]: 多平台验证编排；验证分支 push 可直接执行，不借用默认分支旧结果
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 name: test
@@ -62,6 +62,8 @@ jobs:
       - name: Test Android binary strings and native library negative controls
         run: node --test scripts/check-binary-strings.test.js scripts/verify-android-so.test.js
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
       - name: Install Android SDK and host compiler dependencies
         run: |
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
@@ -105,6 +107,7 @@ jobs:
         run: npm run build:harmony-har -- --build-mode release
       - name: Verify real Release HAR and negative controls
         run: |
+          apt-get update && apt-get install -y python3
           python3 -B scripts/check-harmony-har.py harmony/pakta.har
           python3 -B scripts/test-harmony-har.py --har harmony/pakta.har -v
           python3 -B scripts/test-binary-strings-har.py --har harmony/pakta.har -v
@@ -197,7 +200,7 @@ jobs:
       # the cpp/update_flow_core port. The vectors themselves are kept in
       # sync with the TS side by src/__tests__/flowVectors.test.ts (js-test).
       - name: Replay flow golden vectors against the C++ port
-        run: SANITIZE=1 ./scripts/test-update-flow-core.sh
+        run: SANITIZE=1 bash scripts/test-update-flow-core.sh
 
   apple-source-test:
     name: Apple source contracts and negative controls
@@ -207,6 +210,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+      - name: Install Objective-C++ syntax compiler
+        run: sudo apt-get update && sudo apt-get install -y clang
       - name: Run all Apple Python tests
         run: python3 -B -m unittest discover -s scripts/tests/ios-purge-restore -p 'test_*.py' -v
 
@@ -221,3 +226,66 @@ jobs:
           submodules: recursive
       - name: Run deterministic native ordering tests and negative controls
         run: SANITIZE=1 VERIFY_REGRESSIONS=1 bash scripts/test-ios-purge-restore.sh
+
+  tvos-build:
+    name: tvOS native Release compile and application link
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      RCT_NEW_ARCH_ENABLED: '1'
+      RCT_USE_PREBUILT_RNCORE: '0'
+      RCT_USE_RN_DEP: '0'
+      LANG: en_US.UTF-8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.4'
+      - name: Generate an isolated RN-tvos 0.85.3-3 native consumer
+        run: node ../.github/workflows/scripts/create-tvos-host.js "$RUNNER_TEMP/pakta-tvos-host"
+      - name: Install and verify the tvOS consumer
+        working-directory: ${{ runner.temp }}/pakta-tvos-host
+        run: |
+          bun install
+          node assert-host.js
+      - name: Generate the tvOS application and install CocoaPods
+        working-directory: ${{ runner.temp }}/pakta-tvos-host/ios
+        run: |
+          set -euo pipefail
+          ruby create-project.rb
+          pod install | tee ../pod-install.log
+          grep -F 'rn-update (' Podfile.lock
+          test -f 'build/generated/ios/ReactCodegen/RCTPaktaSpec/RCTPaktaSpec.h'
+      - name: Compile and link the tvOS Release application
+        working-directory: ${{ runner.temp }}/pakta-tvos-host/ios
+        run: |
+          set -euo pipefail
+          xcodebuild -workspace PaktaTVValidation.xcworkspace -scheme PaktaTVValidation \
+            -configuration Release -sdk appletvsimulator \
+            -destination 'generic/platform=tvOS Simulator' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build | tee ../tvos-build.log
+          app=build/Build/Products/Release-appletvsimulator/PaktaTVValidation.app
+          test -f "$app/PaktaTVValidation"
+          xcrun nm "$app/PaktaTVValidation" > ../linked-symbols.txt
+          grep -F 'OBJC_CLASS_$_RCTPakta' ../linked-symbols.txt
+          xcrun otool -L "$app/PaktaTVValidation" > ../linked-frameworks.txt
+          grep -F '/Network.framework/' ../linked-frameworks.txt
+      - name: Preserve tvOS build evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tvos-native-build-evidence
+          path: |
+            ${{ runner.temp }}/pakta-tvos-host/*-*.log
+            ${{ runner.temp }}/pakta-tvos-host/linked-*.txt
+            ${{ runner.temp }}/pakta-tvos-host/ios/Podfile.lock
+            ${{ runner.temp }}/pakta-tvos-host/bun.lock
+          if-no-files-found: warn
+          retention-days: 7

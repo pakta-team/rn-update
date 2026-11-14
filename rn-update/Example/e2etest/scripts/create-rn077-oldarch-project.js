@@ -2,7 +2,7 @@
 /**
  * [INPUT]: 依赖 RN 0.77 模板、e2e harness 与 package-candidate 的本地 tgz 身份校验
  * [OUTPUT]: 提供 generateProject 及命令入口，生成只消费同一候选包的旧架构宿主
- * [POS]: e2etest 隔离消费边界，重定位 Metro/原生根并注入安装、Release、运行时断言
+ * [POS]: e2etest 隔离消费边界，闭合 JS/Node 编译输入、重定位原生根并注入安装、Release、运行时断言
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -102,8 +102,13 @@ function generateProject(options = {}) {
       'scripts',
       'src',
       'tsconfig.json',
+      'tsconfig.node.json',
       'update.json',
     ].forEach(copyFromBase);
+
+    const tsConfig = JSON.parse(readText('tsconfig.json'));
+    delete tsConfig.compilerOptions.paths;
+    writeText('tsconfig.json', `${JSON.stringify(tsConfig, null, 2)}\n`);
 
     for (const config of ['metro.config.js', 'react-native.config.js']) {
       writeText(

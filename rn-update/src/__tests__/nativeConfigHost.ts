@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖宿主 C++17 编译器与生产配置共享核；Windows 通过 Ubuntu WSL 运行
+ * [OUTPUT]: 提供 configCore 与 normalizeConfiguration，将 JSON 请求交给真实共享核
+ * [POS]: 配置测试的子进程适配器；首次编译应由套件准备钩子承担，不占业务断言预算
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

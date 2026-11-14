@@ -397,12 +397,6 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Create RN 0.77.3 old architecture e2e project
-        run: node Example/e2etest/scripts/create-rn077-oldarch-project.js
-
-      - name: Install RN 0.77.3 old architecture dependencies
-        run: cd .e2e-rn077-oldarch/AwesomeProject && bun install
-
       - name: Remove committed Android native libraries
         run: rm -rf android/lib
       - name: Use CI-built Android native libraries
@@ -416,20 +410,43 @@ jobs:
           cd android/lib
           sha256sum --check SHA256SUMS
 
-      - name: Link local rn-update
+      - name: Install SDK declaration build dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Create the Android SDK candidate from this run's native libraries
+        # RN077 必须安装候选本身，后续不能用 checkout 链接替换并绕过候选守卫。
+        # 该包仅供 Android 消费构建，不宣称包含 Release HAR 或获得发布准入。
         run: |
           set -euo pipefail
-          E2E_DIR=".e2e-rn077-oldarch/AwesomeProject"
-          export LOCAL_RNU_VERSION="$(node -p "require('./${E2E_DIR}/node_modules/rn-update/package.json').version")"
-          LOCAL_RNU_DIR="$PWD/$E2E_DIR/.e2e-artifacts/local-rn-update"
-          rm -rf "$LOCAL_RNU_DIR" "$E2E_DIR/node_modules/rn-update"
-          mkdir -p "$LOCAL_RNU_DIR"
-          cp package.json rn-update.podspec react-native.config.js expo-module.config.json "$LOCAL_RNU_DIR"/
-          rsync -a --exclude='.git' src ios android cpp scripts "$LOCAL_RNU_DIR"/
-          node -e "const fs = require('fs'); const file = process.env.LOCAL_RNU_DIR + '/package.json'; const pkg = JSON.parse(fs.readFileSync(file, 'utf8')); pkg.version = process.env.LOCAL_RNU_VERSION; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');"
-          ln -s ../.e2e-artifacts/local-rn-update "$E2E_DIR/node_modules/rn-update"
-        env:
-          LOCAL_RNU_DIR: ${{ github.workspace }}/rn-update/.e2e-rn077-oldarch/AwesomeProject/.e2e-artifacts/local-rn-update
+          bun run build:types
+          candidate_dir="$RUNNER_TEMP/rn077-android-candidate"
+          mkdir -p "$candidate_dir"
+          npm pack --ignore-scripts --pack-destination "$candidate_dir" --json > "$candidate_dir/pack.json"
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { readCandidate } = require('./scripts/package-candidate');
+          const dir = path.join(process.env.RUNNER_TEMP, 'rn077-android-candidate');
+          const packed = JSON.parse(fs.readFileSync(path.join(dir, 'pack.json'), 'utf8'));
+          assert.equal(packed.length, 1);
+          const candidate = readCandidate(path.join(dir, packed[0].filename));
+          for (const abi of ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']) {
+            const file = `android/lib/${abi}/librnupdate.so`;
+            assert.deepEqual(candidate.readFile(file), fs.readFileSync(file), `${abi} must use this run's library`);
+          }
+          fs.writeFileSync(path.join(dir, 'candidate.json'), JSON.stringify({tarball: candidate.tarball, sha256: candidate.sha256, version: candidate.metadata.version}, null, 2) + '\n');
+          fs.appendFileSync(process.env.GITHUB_ENV, `RNU_SDK_TARBALL=${candidate.tarball}\nRNU_SDK_SHA256=${candidate.sha256}\n`);
+          NODE
+
+      - name: Create RN 0.77.3 old architecture e2e project
+        run: node Example/e2etest/scripts/create-rn077-oldarch-project.js
+
+      - name: Install and verify the RN 0.77.3 candidate consumer
+        run: |
+          cd .e2e-rn077-oldarch/AwesomeProject
+          bun install
+          node scripts/assert-rn077-oldarch.js
 
       - name: Install rn-update-cli dependencies
         run: cd ../rn-update-cli && bun install --frozen-lockfile && bun run build
@@ -439,6 +456,9 @@ jobs:
           DETOX_ANDROID_ARCHS: x86_64
           DETOX_AVD_NAME: api34
         run: cd .e2e-rn077-oldarch/AwesomeProject && E2E_PLATFORM=android bunx detox build --configuration android.emu.release
+
+      - name: Verify both host and SDK Release architecture
+        run: cd .e2e-rn077-oldarch/AwesomeProject && node scripts/assert-rn077-oldarch.js --release
 
       - name: Prepare local update artifacts
         env:
@@ -478,5 +498,14 @@ jobs:
         with:
           name: e2e-android-rn077-oldarch-detox-artifacts
           path: rn-update/.e2e-rn077-oldarch/AwesomeProject/artifacts
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Preserve the RN077 candidate identity
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rn077-android-candidate
+          path: ${{ runner.temp }}/rn077-android-candidate/
           if-no-files-found: ignore
           retention-days: 7

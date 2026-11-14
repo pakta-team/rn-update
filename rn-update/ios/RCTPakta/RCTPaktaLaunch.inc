@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖共享 state_core、状态锁/defaults、Identity/安装完整性，以及 Orchestrator 冷启动与 tvOS 恢复入口
+ * [OUTPUT]: 实现启动 bundle 选择/回滚、无桥配置与原生检查公共入口，向 Orchestrator 传递启动结果
+ * [POS]: RCTPakta.mm 的宿主启动边界；身份变化在锁内清理旧版本状态，恢复结束后重解析，调度始终由 finally 触发
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 + (NSURL *)bundleURL
 {
     paktaIsUsingBundleUrl = true;

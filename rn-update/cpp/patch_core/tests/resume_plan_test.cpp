@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖生产 resume_plan、flow_json 和可选上游 JSON 向量，不替换续传规则
+ * [OUTPUT]: 提供续传规划独立回归程序，以及供宿主控制流测试调用的 --rpc JSON 进程入口
+ * [POS]: patch_core 的纯规则对拍层；验证范围、响应与 sidecar 边界，不执行真实 HTTP 或平台下载
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #include <cstdio>
 #include <fstream>
 #include <iostream>

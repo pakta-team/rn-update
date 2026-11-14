@@ -1,3 +1,7 @@
+# [INPUT]: 依赖 unittest、test-harmony-har 夹具与 HAR checker/Node 禁串入口，显式读取 --har
+# [OUTPUT]: 对外提供全部库扫描、路径、额外库、缺 Node 与真实双 ABI 缺库/禁串负控
+# [POS]: scripts 的 HAR 禁串专项，临时构造突变而不修改输入 HAR，不证明原生链接或设备行为
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 import argparse
 import copy
 import hashlib

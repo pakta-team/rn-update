@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖共享 resume_plan，以及 pakta.cpp 的 NAPI 参数、UTF-8 字符串和错误转换工具
+ * [OUTPUT]: 提供范围解析、请求规划、响应分类和 sidecar 四个内部 NAPI 回调，捕获 C++ 异常
+ * [POS]: Harmony 续传薄桥，由 pakta.cpp 单点包含；纯规则归共享核，下载 IO 与预算归 ArkTS
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #pragma once
 #include "resume_plan.h"
 

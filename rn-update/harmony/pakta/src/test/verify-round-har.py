@@ -1,3 +1,7 @@
+# [INPUT]: 依赖显式 HAR、SDK LLVM readelf/nm 与 Python 标准库读取归档、ELF 和摘要
+# [OUTPUT]: 校验双 ABI 架构、17 项安装配置轮次注册、旧桥退出和内部未解析引用，输出带 SHA-256 的 JSON 回执
+# [POS]: Harmony 测试层的只读发布产物门卫；核对原生链接及轮次入口，不执行设备 NAPI 或更新流程
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 import argparse
 import hashlib
 import json

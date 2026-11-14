@@ -139,7 +139,7 @@ jobs:
           path: rn-update/harmony
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.2.3'
+          ruby-version: '3.2.11'
       - name: Check independent tvOS targets and Network specification contracts
         env:
           GEM_HOME: ${{ runner.temp }}/podspec-gems

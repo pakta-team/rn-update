@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖独立发布/重试编排、CLI API 替身、临时制品与历史渠道夹具
+ * [OUTPUT]: 验证渠道精确身份和整批预检、逐目标 CAS、幂等重试/冲突透传及 dry-run 零写入
+ * [POS]: CLI 到独立服务的命令契约回归，与真实 PostgreSQL CAS 测试分层验收
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';

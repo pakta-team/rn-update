@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Node 文件系统读取 checkout 的 Android.mk、Harmony CMake、Podspec 与递归本地 include
+ * [OUTPUT]: 对外提供 sourceClosure、checkNativePacklist，校验候选原生源码闭包与 checkout 字节同源
+ * [POS]: scripts 的包内容边界，供清单入口复用，拒绝缺源、异源及开发目录而不执行平台构建
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 const { existsSync, readFileSync, readdirSync } = require('node:fs');
 const path = require('node:path');
 

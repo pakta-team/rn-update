@@ -19,7 +19,7 @@ endpoint.test.ts: 多端点执行回归；验证 hedge、超时、去重、胜�
 error.test.ts: 错误码契约回归；验证稳定码收窄与跨平台 [CODE] 消息前缀解析
 errorReporting.test.ts: 错误上报回归；验证异常限长序列化与全局 ErrorUtils 处理器链式安装/卸载
 flowVectors.test.ts: JS/C++ 更新流黄金向量一致性检查；阻止跨语言决策语义漂移
-harmonyInstallRecord.test.ts: T11 真实 Node NAPI addon + 共享安装核/文件 IO/SHA-256 驱动真实 ArkTS InstallRecord/ArchiveLimits/DownloadTask VM；覆盖 Seal/Promote/激活快照/归档/manifest，Windows 需 Ubuntu WSL 与 C++17/Node headers，不冒充 OpenHarmony 设备
+harmonyInstallRecord.test.ts: 真实Node NAPI/共享安装核/文件IO驱动ArkTS安装适配器；激活快照覆盖Promise兑现、返回值分配及抛错同步重入，宿主进程有期限；Windows需Ubuntu WSL与C++17/Node headers，不冒充OpenHarmony设备
 harmonyRound.test.ts: T15 真实命令执行器回放26条适用共享向量及覆盖门禁；比较事件、IO命令、双预算与回执，核心由轨迹替身提供
 harmonyCommit.test.ts: T15 真实UpdateContext VM延迟摘要验证串行队列、快照变化零业务写入、配置代际门禁和公共切包队列恢复；存储/快照替身不冒充设备
 i18n.test.ts: 语言选择、回退与插值回归；保证无外部运行时的文案解析稳定

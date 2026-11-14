@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Bun/VM 现提三端旧布局选择性清理逻辑与 Harmony UpdateContext，提供受限平台替身
+ * [OUTPUT]: 对外提供安装级数据保护、单 flush、代际拒绝与运行目录保护回归
+ * [POS]: src 的版本级清理契约宿主，验证删除边界而不证明真实平台存储或迁移
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';

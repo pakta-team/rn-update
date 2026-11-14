@@ -137,8 +137,8 @@ jobs:
       GIT_CONFIG_COUNT: '1'
       GIT_CONFIG_KEY_0: core.autocrlf
       GIT_CONFIG_VALUE_0: 'false'
-      RNU_HARMONY_SDK_SHA256: b5ed311d93edb83564357369a10dab59608012351bade92f6125cc6ac55de237
-      RNU_HARMONY_HAR_SHA256: ee0d33ebd0a469e889279943d4ad69ba4a3ad0b29e7a00a71839382c3f3146a8
+      RNU_HARMONY_SDK_SHA256: 4818abacdfd97e308b80f8f8bbbb96ade221d58f1135e0a703d7b5069cc06cbf
+      RNU_HARMONY_HAR_SHA256: 92bb0c023ca9a4c2160a7ed20db8ea19bf7437b7eac8f2e64733f592935bc9ff
     steps:
       - name: Checkout isolated validation source
         uses: actions/checkout@v7

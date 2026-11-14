@@ -33,7 +33,7 @@ resume-map.md: T13 续传半部的纯核心/三端 IO 所有权、文件契约�
 flow-map.md: T13 配置/T14 sans-IO 纯核的冻结来源、本地身份差异、文件契约、普通/sanitizer 与取消预算实跑记录；不授权平台接线或存储迁移
 android-round-map.md: T15 Android 命令执行器/设备端口/flow JNI 的所有权、28 回放与6取消专项、73项Gradle结果及四ABI重建/hash；设备/JNI运行仍待验
 apple-round-map.md: T16 Apple 单编译单元职责片段、唯一共享轮次、逐批摘要/受限提取回放及 macOS/RN/Expo/tvOS 待验边界
-harmony-round-map.md: T15 Harmony先回放后接线、安装NAPI/CMake集成、串行队列内快照复核及强制SDK/新HAR双ABI链接证据，设备仍待验
+harmony-round-map.md: Harmony轮次/NAPI所有权与验证历史；登记首轮完整设备full后重入死锁、注册表锁修复、241宿主检查及92bb0c新Release HAR，修复后完整设备结果由根平台回执独立记录
 install-map.md: T11 安装记录/封存晋升/激活、manifest/archive核心与后续Android/Harmony桥接回执；分开记录宿主/ABI产物通过和设备待验
 generate-contract.js: T08 生成/只读检查入口，全部预检后仅写漂移声明并保留分区外字节及原换行符；导出 generate/planGeneration 供临时副本测试
 generate-native-bindings.js: T09 从本地 NativePakta.ts AST 派生旧桥 NativePaktaSpec.java 与 Harmony PaktaMethods.inc；--check 只读，不生成业务或静态 JNI

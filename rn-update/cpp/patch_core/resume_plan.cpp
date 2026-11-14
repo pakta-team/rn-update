@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 resume_plan.h 的续传契约与 update_flow_core/flow_json 的受限 JSON 解析和序列化
+ * [OUTPUT]: 实现 Content-Range 校验、请求规划、响应分类及 sidecar 序列化四项纯规则
+ * [POS]: patch_core 的续传决策实现；三端下载器提供网络、文件、重试和预算，不在此执行 IO
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #include "resume_plan.h"
 
 #include <cmath>

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 getDepVersions/getDepVersion、临时 package.json/依赖树与 cwd 替身
+ * [OUTPUT]: 验证延迟解析、单项读取、排序去重、缺失依赖容错及跨 cwd 缓存失效
+ * [POS]: CLI 依赖版本采集回归，隔离项目根而不请求 registry
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import * as fs from 'fs';
 import * as os from 'os';

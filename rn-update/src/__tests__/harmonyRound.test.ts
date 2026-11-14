@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Bun 转译真实 Harmony 轮次执行器与共享 golden vectors，在 VM 中替换核心轨迹
+ * [OUTPUT]: 对外提供轮次回放、覆盖门禁、预算取消与 IO 命令顺序回归
+ * [POS]: src 的 Harmony sans-IO 接线宿主，验证真实执行器而不替代 NAPI 或设备测试
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';

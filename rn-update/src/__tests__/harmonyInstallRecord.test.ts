@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖宿主 sh/C++17/Node headers，构建真实 NAPI 与共享核后驱动 ArkTS 适配器
- * [OUTPUT]: 提供安装记录、归档、配置和轮次的真实宿主文件 IO 回归
+ * [OUTPUT]: 提供安装记录、归档、配置和轮次的真实宿主文件 IO 回归，注入同步 NAPI 重入并限制子进程期限
  * [POS]: Harmony 安装桥的宿主集成测试；显式 shell 启动构建，不依赖脚本执行位，不代表设备运行
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -120,13 +120,31 @@ async function main() {
   check(() => assert.equal(install.isRecordForVersion(install.parseInstallRecord('{}'),'abc'),false));
   await install.writeInstallRecord(version,install.buildInstallRecord('abc',record.bundleSha256,''));
   await rejects(() => install.writeInstallRecord(version,'{}'), /FILE_OPERATION_FAILED/);
+  let reentries = 0;
+  native.installTestReentry('resolve', external => {
+    native.installActivationUnchanged(external);
+    reentries++;
+  });
+  const reentrantSnapshot = await native.installCheckActivation(version,'abc',false);
+  check(() => assert.equal(reentries,1));
+  native.installTestReentry('undefined', () => {
+    native.installActivationUnchanged(reentrantSnapshot);
+    reentries++;
+  });
+  check(() => native.installActivationUnchanged(reentrantSnapshot));
+  check(() => assert.equal(reentries,2));
   const snapshot = await install.verifyInstallForActivation(version, 'abc', bundle(version));
   check(() => install.assertInstallActivationUnchanged(snapshot));
   check(() => assert.throws(() => native.installActivationUnchanged({}), /snapshot/));
   check(() => assert.throws(() => native.installSeal(staging, 'abc', '', 'extra'), /arguments/));
   check(() => assert.throws(() => native.installBuildRecord('abc', '', ''), /PATCH_FAILED/));
   fs.writeFileSync(bundle(version), 'tampered');
+  native.installTestReentry('throw', () => {
+    assert.throws(() => native.installActivationUnchanged(reentrantSnapshot), /SWITCH_VERSION_FAILED/);
+    reentries++;
+  });
   check(() => assert.throws(() => install.assertInstallActivationUnchanged(snapshot), /SWITCH_VERSION_FAILED/));
+  check(() => assert.equal(reentries,3));
   await rejects(() => install.verifyInstallForActivation(version,'abc',bundle(version)), /SWITCH_VERSION_FAILED/);
   for (const text of ['{}',' ','null','[]','{',JSON.stringify({schema:1,versionHash:'abc'}),JSON.stringify({schema:2,versionHash:'abc'})]) {
     fs.writeFileSync(version + '/.pakta-complete', text);
@@ -189,8 +207,8 @@ main().catch(e => {console.error(e); process.exitCode=1}).finally(() => fs.rmSyn
 `;
     const result = spawnSync(
       windows ? 'wsl' : 'node',
-      windows ? ['-d', 'Ubuntu', '--', 'node'] : [],
-      { encoding: 'utf8', input: script }
+      windows ? ['-d', 'Ubuntu', '--', 'timeout', '30s', 'node'] : [],
+      { encoding: 'utf8', input: script, timeout: 35000 }
     );
     expect(result.status, result.stderr).toBe(0);
     const checks = JSON.parse(result.stdout.trim()).checks;

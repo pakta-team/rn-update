@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖项目 package.json、已安装依赖目录、文件系统与路径解析
- * [OUTPUT]: 对外提供 getDepVersions、getDepVersion 与惰性 depVersions 代理
+ * [OUTPUT]: 对外提供惰性缓存的 getDepVersions 与单依赖读取 getDepVersion
  * [POS]: CLI 运行时版本信息边界，按需读取依赖版本并缓存，供诊断和命令编排消费
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */

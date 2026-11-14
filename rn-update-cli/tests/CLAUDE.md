@@ -22,15 +22,15 @@ command-result.test.ts: 命令结果协议
 commands.test.ts: 命令分组与调度
 constants.test.ts: 品牌与服务地址常量
 setup.ts: Bun 测试预加载，将兼容性回归固定在旧路由兼容模式；生产基址仍只使用当前服务
-dep-versions.test.ts: 依赖版本采集
-fs-helpers.test.ts: 文件系统原语与缓存目录
+dep-versions.test.ts: 临时依赖树与 cwd 替身验证延迟/单项版本解析、排序去重、缺依赖容错和跨项目缓存失效
+fs-helpers.test.ts: 实际临时磁盘验证创建/清空/存在性/删除/移动覆盖及读取失败透传，不声称覆盖缓存目录选择
 hash.test.ts: 流式 SHA-256 的空文件标准摘要、二进制多分块一致性与缺失文件错误传播
 failure-fingerprint.test.ts: detail 脱敏保形、标识符全抹与 failureFingerprint 跨表达稳定的指纹契约
 diff-hbc-transform.test.ts: HBC 差分转换
 diff-integrity.test.ts: 差分完整性校验
 diff-stream.test.ts: 流式差分边界
 diff.test.ts: 通用差分行为
-git.test.ts: Git 发布元数据采集
+git.test.ts: 临时真实 Git 仓库验证提交/remote 元数据，非仓库返回空值且不访问远端
 hbc-transform.test.ts: Hermes 字节码转换
 hermes-base.test.ts: Hermes base 下载、缓存、字面量/指令等价校验、DefineOwnById `<str>` 折叠与脱敏指纹发布元数据
 hermes-base-safety.test.ts: pretty 归一化不抹除语义空白、寄存器或分支目标的安全负例
@@ -44,16 +44,16 @@ hermes-raw.test.ts: 真实 Hermes 编译器下完整操作数、函数引用、�
 hermes-review-regressions.test.ts: hermesFuzzSucceeded 终局裁决真值表回归（planted 漏检、compileErrors、空轮次）
 hermes-switch-normalization.test.ts: Hermes 开关归一化
 hermes-timeout.test.ts: Hermes 探测/验证期限、取消传播与异步错误收敛
-http-helper.test.ts: standalone 服务地址与代理判定
+http-helper.test.ts: runtimeFetch 替身验证 testUrls 延迟并发、成功选择、落败请求取消与全失败首地址回退，不访问真实网络
 i18n.test.ts: 国际化资源、中文 locale 识别、非中文英文兜底与中英文键集合对称性
 latest-version.test.ts: T23 registry/auth/代理请求契约、scope 编码、fresh/stale 精确边界、强制刷新、跨 registry 隔离及 HTTP/JSON/网络/响应/超时失败回退；临时缓存与模块 mock 隔离，不访问真实 registry
 native-package.test.ts: 原生包精简与重打包（保留 resources.arsc 基线）
 non-interactive.test.ts: CI 非交互模式
-options.test.ts: 通用参数读取
-package-optimization.test.ts: 原生包上传优化
+options.test.ts: 布尔/字符串/可选值/重复与逗号列表的纯函数归一化及缺省边界
+package-optimization.test.ts: 模拟包列表与 TTY 输入，验证 choosePackage 有效 ID 返回与无效 ID 后继续提示；不证明真实网络或请求次数优化
 package.test.ts: buildTime 空白/非有限值原样字符串化、parseApp/Apk/Ipa/Aab JSON 剔除 bundle 字节、standalone 原生制品绑定、缺失渠道自动创建、精确重复短路与同版本换 JS 拒绝
 provider.test.ts: Provider API 映射
-resource-finder.test.ts: resources.arsc 资源表解析
+resource-finder.test.ts: 构造真实 resources.arsc 验证 UTF-8/UTF-16、整数/引用条目与非法/截断输入拒绝
 runtime.test.ts: Node/Bun 请求与进程运行时
 slim-sourcemap.test.ts: Source map 压缩归档
 standalone-publish.test.ts: retry 单/多目标逐行 expectedRevision 与禁发 revision 契约；重复执行保持批次幂等身份且无制品创建或上传；模拟读取后任一目标 revision 过期时整批拒绝、错误透传且无部分写入，dry-run 零写请求并与实发 CAS 批次一致（不替代真实 Go/数据库事务验收）
@@ -64,11 +64,11 @@ upload-chunked.test.ts: GCS 分片并行上传、分片重试、拒绝短路与�
 upload-request.test.ts: 真实 HTTP multipart/PUT 的 Content-Length、原始 ETag、取消/提前拒绝资源清理与错误传播
 upload-standalone.test.ts: T22 uploadTimeoutMs 零/负值、整/跨 MiB、6 MiB 下限临界及 1 GiB 大文件预算；standalone 代理接入、失败分片流重建/进度回滚、零字节 PUT、重试耗尽期限和部分失败/管理失败的会话 complete/abort 契约
 user.test.ts: 邮箱登录、退出与身份命令契约
-utils.test.ts: 通用工具行为
+utils.test.ts: 模板替换、非交互标记、manifest 阈值与扩展名/魔数压缩规则的纯函数边界
 versions.test.ts: 发布、绑定、独立服务交互投放与 pdiff 命令；锁定制品流式哈希不整文件读取、相同 SHA-256 去重复用及读取失败零写入
 zip-entries.test.ts: ZIP 条目枚举、嵌套 HAP 清理及输出早期写失败无未处理 rejection，abort 不删既有目录
 zip-options-file.test.ts: ZIP 选项文件解析
-zip-range.test.ts: ZIP Range 定位与下载
+zip-range.test.ts: 隔离 HTTP/真实 ZIP 验证 Range 条目定位、请求预算与缓存、If-Range 一致性、整包回退、Hash 拒绝和传输期限
 zip-raw-writer.test.ts: ZIP 原始条目写入
 fixtures/: 进程生命周期测试夹具；只供 Node/Bun 隔离验证，不进入生产包
 

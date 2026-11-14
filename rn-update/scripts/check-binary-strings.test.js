@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Node 测试/临时目录与 check-binary-strings 的扫描接口，读取四 ABI 发布库作为只读正控
+ * [OUTPUT]: 对外提供合法身份与逐文件禁串、路径及缺失输入的正负控回归
+ * [POS]: scripts 的二进制身份测试，所有突变只作用于临时副本，不写发布库
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

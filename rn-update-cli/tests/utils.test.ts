@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 translateOptions/isNonInteractive、ZIP 压缩规则与受控全局/环境标记
+ * [OUTPUT]: 验证模板替换优先级、非交互判定、manifest 阈值及扩展名/魔数压缩选择
+ * [POS]: CLI 共用工具的纯规则回归，与真实 ZIP 写入/差分集成分离
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { isNonInteractive, translateOptions } from '../src/utils';
 import {

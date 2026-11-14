@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * [INPUT]: 依赖已编译 lib、当前 Node 运行时、本地旧 API 伪服务与代理子进程
- * [OUTPUT]: 对外提供全模块加载、最低 Node 版本命令及本地兼容上传链路烟雾验证
+ * [OUTPUT]: 对外提供全模块加载、最低 Node 命令、ZIP 写入偏移与本地兼容上传链路烟雾验证
  * [POS]: scripts 运行时兼容守门，固定本地伪服务为显式测试兼容模式，补足 Bun 测试无法证明的 Node 装载能力
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -79,6 +79,14 @@ function runCli(args) {
 runCli(['help']);
 runCli(['-v']);
 console.log('smoke: `help` and `-v` ran without warnings');
+
+const zipOffset = spawnSync(
+  process.execPath,
+  [path.join(__dirname, 'test-zip-offset.js')],
+  { stdio: 'inherit', timeout: CLI_TIMEOUT_MS },
+);
+if (zipOffset.error) throw zipOffset.error;
+if (zipOffset.status !== 0) throw new Error('ZIP offset regression failed');
 
 // --- proxy scenario ---------------------------------------------------------
 // Node's built-in fetch ignores HTTP(S)_PROXY, so the CLI routes every request

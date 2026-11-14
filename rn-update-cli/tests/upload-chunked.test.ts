@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 uploadFile、流式上传传输替身、运行时/API 替身与分段可辨识文件
+ * [OUTPUT]: 验证 GCS 分片字节范围、失败重试、拒绝时不 complete 及旧服务整文件回退
+ * [POS]: CLI 分片上传协议回归，实际消费请求流以检查字节而不访问对象存储
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import fs from 'fs';
 import os from 'os';

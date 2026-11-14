@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * [INPUT]: 依赖 WSL/Linux Node、rn-update-cli >=1.0.0、node-hdiffpatch 与目标平台完整 PPK/APK 制品
- * [OUTPUT]: 对外提供 Android/Harmony 真实差分生成器，按平台拓扑写入 ppk/package/v2-track patch 及 manifest
+ * [INPUT]: 依赖 WSL/Linux Node、rn-update-cli、node-hdiffpatch、目标平台制品与共享流式 ZIP 门卫
+ * [OUTPUT]: 对外提供 Android/Harmony 差分生成器，全套 ZIP 结构/CRC/清单通过后才提交 fullFallback=false
  * [POS]: Windows 开发机的原生 hdiff 旁路；以显式平台选择约束差分基线，防止跨平台复用错误 origin
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { verifyArtifactSet } = require('./verify-update-artifacts');
 
 const cliRoot = process.env.RNU_WSL_CLI_ROOT;
 const hdiffRoot = process.env.RNU_WSL_HDIFF_ROOT;
@@ -127,6 +128,15 @@ async function main() {
     requireFile(apk, 'app-release.apk');
   }
 
+  const manifestPath = path.join(artifactDir, 'manifest.json');
+  const manifest = fs.existsSync(manifestPath)
+    ? JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+    : getManifestDefaults();
+  manifest.platform = platform;
+  manifest.fullFallback = true;
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await verifyArtifactSet(artifactDir, platform, false);
+
   await diffCommands.hdiff({
     args: [v1, v2],
     options: {
@@ -169,10 +179,7 @@ async function main() {
   });
   verifyFile(v2TrackDiff, 'to-v4.v2track.ppk.patch');
 
-  const manifestPath = path.join(artifactDir, 'manifest.json');
-  const manifest = fs.existsSync(manifestPath)
-    ? JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-    : getManifestDefaults();
+  await verifyArtifactSet(artifactDir, platform);
   manifest.platform = platform;
   manifest.generatedAt = new Date().toISOString();
   manifest.fullFallback = false;

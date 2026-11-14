@@ -10,7 +10,7 @@ assert-local-sdk.js: 在构建/测试前断言 Metro 与 RN CLI 均指向当前�
 build-real-service-android.js: 从环境变量生成忽略提交的基线/更新入口，并按 apk/ppk 模式构建网络配置一致、可参数化 channel/packageVersion 且不污染默认 Detox 配置的真服务 Android 制品
 build-local-device-android.js: 从局域网 endpoint 生成忽略提交的入口并构建连接本地 E2E server 的 Android Release APK，隔离模拟器的 10.0.2.2 默认值
 build-harmony-e2e.sh: 构建并安装 HarmonyOS e2e 基础应用；默认 release buildMode（debug hap 会跳过 markSuccess 导致重启回滚），hvigor 优先使用 DevEco 自带 Node 规避新版 Node 的 fs.rmdirSync 拒绝
-run-harmony-e2e.js: Node 跨平台分阶段 Harmony 入口（stage/sync/prepare/base/build/diff/install/test/check/all）；构建/安装证明绑定完整 tgz、HAR、JS/glue/base/HAP 与显式设备目标，固定两套完整 Jest 并校验必需用例和运行前后输入，拒绝过滤/旧结果/假绿安装；默认刷新 OHPM，仅显式依赖复用且全量门卫通过时跳过，不持有签名，参数见 harmony-e2e-map.md。
+run-harmony-e2e.js: Node 跨平台分阶段 Harmony 入口；生成和复用均流式验证 full/patch 的 ZIP 结构、CRC、预算与必需条目，坏包零设备动作拒绝；构建/安装绑定完整 tgz/HAR/JS/glue/base/HAP/显式目标，固定完整 Jest，依赖仅在严格门卫通过后显式复用，不持有签名。
 harmony-e2e-sdk.js: 候选输入边界，stage在安装前将完整摘要候选复制到样例忽略的.local-sdk路径，sync物理隔离SDK并逐字节核对生产源码，拒绝根开发依赖与React/RN/RNOH跨树解析；由run-harmony-e2e.js复用。
 harmony-e2e-inputs.js: 只读 gzip/TAR 与 OHPM 复用门卫，完整 HAR 文件 SHA256、版本、当前短项目 file:../pakta.har 清单/锁和项目内物理 store 必须一致；拒绝额外/缺失/漂移文件、链接逃逸、TAR 路径别名和损坏，不写工程或静默安装。
 harmony-e2e-results.js: helper 与设备驱动共享的 HDC 安装回执门卫，接受传统成功句及 SDK26 路径回执与 AppMod finish 的完整组合，拒绝 unsuccessfully/Fail/Error；验收 Jest 两套当前工程结果和九项必需测试，拒绝空套件、过滤、跳过、缺失和错工程结果。
@@ -27,7 +27,10 @@ rn077-oldarch-map.md: RN077 生成/候选/Release/设备分层证据与未验边
 detect-ios-simulator-type.js: 选择与 Detox 一致的 iOS 模拟器 runtime
 drive-expo-update-ui.py: 显式候选全文件/物理安装守门后，通过 ADB/UI Automator 验证隔离 Expo 宿主两策略四阶段更新与重启，拒绝非 probe/e2e 应用数据清理
 expo-ota-map.md: Expo57隔离宿主、候选安装、限定网络例外、共享制品准备与设备驱动的可重现命令和证据边界
-generate-platform-diffs-wsl.cjs: 在 Windows 无 hdiff 原生绑定时，通过显式 Android/Harmony 平台拓扑选择正确基线并生成真实差分
+generate-platform-diffs-wsl.cjs: 显式 Android/Harmony 拓扑的真实差分生成器；重生前撤销旧 false 证明，全部 full/patch ZIP 门卫通过后才提交 fullFallback=false。
+verify-update-artifacts.js: 复用 node-stream-zip 定位中央目录/流式解压，逐条校验 local/central/descriptor、大小、CRC、必需 bundle/patch/__diff.json 与清单形状；沿用 contract.json 归档预算，异步供生成器、独立子进程供同步复用门卫，不解包。
+verify-update-artifacts.test.js: TEMP 黄金 ZIP 正控及缺首53字节、目录偏移/尺寸、descriptor、CRC、必需条目、清单形状和解压预算负控；假生成器验证失败保留 fallback=true，不运行真实构建或设备。
+zip-artifact-fixtures.js: Python zipfile 冻结的极小 full/patch/deflate-descriptor/非法清单原字节，独立于待测 CLI 写入器，供 Node 门卫与编排回归共用。
 ios-rescue-server.ts: §11 iOS 救砖实验的状态化本地 HTTP 服务
 load-compiled-e2e-hook.js: 加载 compile-node-ts 产物供 Jest global hook 转发
 local-e2e-server.ts: 提供本地版本、制品、控制与状态接口

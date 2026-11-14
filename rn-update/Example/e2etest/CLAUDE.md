@@ -18,7 +18,7 @@ ios/: iOS Detox 宿主工程与 bundle 入口
 jest.config.js: 单元测试 runner 配置，排除端到端套件
 jest.setup.js: Jest 环境中的 React Native 全局替身初始化
 metro.config.js: Metro resolver、缓存与 monorepo 包边界配置，强制当前工作树 SDK 与宿主 React Native 单例；观察父根时仅放行 SDK src/package.json 和当前宿主，排除其它样例/原生构建树
-package.json: e2etest 工程脚本与平台命令；官方 SDK 1.1.0 仅提供安装依赖，真实 JS/native 根由 Metro 与 react-native.config.js 固定为当前工作树，assert-local-sdk.js 阻断假验证；提供参数化真服务 Android 制品、harmony:e2e 分阶段入口及编排门禁回归，直接锁定 json5 解析 Harmony 清单/锁，避免依赖偶然提升。
+package.json: e2etest 工程与平台命令；官方 SDK 仅提供安装依赖，真实 JS/native 固定到工作树；harmony:e2e 分阶段入口与编排/结果/ZIP 三组 Node 回归共用 scripts 门卫，json5 与 node-stream-zip 为锁定的直接开发依赖。
 react-native.config.js: 覆盖 RN CLI 的 SDK 依赖根，确保 Gradle/Codegen 不消费 node_modules 中的旧发布包
 scripts/: 本地服务、产物准备、平台构建和 Node/TS hook 编排脚本
 README.md: 平台命令与 RN077 本地 tgz 生成入口，链接生成/Release/设备分层地图

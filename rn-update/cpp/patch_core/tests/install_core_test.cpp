@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖真实 install_record、digest、patch_manifest、archive_limits 与 flow_json，读取本地契约向量并操作临时文件
+ * [OUTPUT]: 提供安装核心独立测试程序，以检查计数和退出码报告封存、晋升、激活、摘要及归档边界
+ * [POS]: patch_core 的真实文件 IO 回归层，由 scripts/test-install-core.sh 链接执行，不进入平台交付
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #include "install_record.h"
 #include "archive_limits.h"
 #include "patch_manifest.h"

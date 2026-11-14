@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 JNI 的 Java 字符串和本地引用管理，以及 resume_plan 的共享续传规则
+ * [OUTPUT]: 提供 Android ResumePlan 的 planRequest、classifyResponse、sidecar 三个 JNI 字符串入口
+ * [POS]: patch_core 的 Android 续传薄桥；负责 UTF-8 与异常边界，网络、预算及持久化仍归 Java 下载器
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #include <jni.h>
 #include <stdexcept>
 #include "resume_plan.h"

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 choosePackage、包列表/交互输入替身与临时 TTY 标记
+ * [OUTPUT]: 验证有效 ID 返回目标原生包及无效选择后继续提示直到合法输入
+ * [POS]: CLI 原生包选择回归，通过隔离交互避免把重复拉取优化与真实 API 验收混同
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, mock, spyOn, test } from 'bun:test';
 
 // Mock modules before any imports

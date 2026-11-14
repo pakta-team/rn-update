@@ -1,4 +1,10 @@
 #!/usr/bin/env bun
+/**
+ * [INPUT]: 依赖 Bun shell、Git tag/PUBLISH_VERSION 与 package.json 文件读写
+ * [OUTPUT]: 提供发布前版本格式守门和 CLI package.json 版本写入；dry-run 仍更新本地版本
+ * [POS]: CLI 发布准备入口，只编排元数据，不执行上传或 npm 发布
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';

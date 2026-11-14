@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Bun 测试、真实客户端与受控 React Native/网络替身，隔离单例模块状态
+ * [OUTPUT]: 对外提供渠道/请求体、缓存/根响应、slot 身份、方法替换与上报边界回归
+ * [POS]: src 的客户端兼容边界测试，约束公开调用行为，不承担真实原生平台执行
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import type { CheckResult } from '../type';
 

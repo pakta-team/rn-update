@@ -49,6 +49,18 @@ Release 构建通过；instrumentation 依赖因 Google Maven 超时，最后通
 
 原设备报告中的989603候选与APK摘要保持不变。以上证明未变平台消费输入等价，不改写为以完整b5ed归档重建并重跑设备，也不证明Apple变更、其他ABI执行或全端发布准入。
 
+## Harmony修复后的候选输入等价
+
+新候选`TEMP/pakta-release-VDxQti/rn-update-1.1.0.tgz`，SHA-256`df181fb788169432a2d6f11f6718c429ca10f181921bc5941f9d467743303d9e`；与b5ed包各900文件对比，897文件相同，差异仅Harmony HAR、`install_napi.h`及其cpp地图。上段848项含Harmony，不能套用其零差异分母到本轮。
+
+`post-harmony-candidate-equivalence.json`独立核对三宿主830份Android/JS/共享核及入口文件，零差异；重新读取三份设备拉回APK，原摘要、HBC96/98、基座bundle、全部入包SDK SO及无probe.bundle均保持，库与新候选一致。另核对包含Podspec、Apple源及HDiff/LZMA的796份保守Apple/JS/共享核输入，与b5ed零差异；它只延续未变输入关系，Apple实际构建和设备证据仍以对应原commit/candidate登记。
+
+旧报告不修改，不把新df181写成已完整重建三宿主并重跑设备；Harmony原失败与重建HAR后的HAP/完整suite另由根平台回执记录。此处不扩展其他ABI执行、Apple设备或全平台发布准入。
+
+最终GEB候选为`TEMP/pakta-release-G4U0R6/rn-update-1.1.0.tgz`，SHA-256`4818abacdfd97e308b80f8f8bbbb96ade221d58f1135e0a703d7b5069cc06cbf`。与df181各900文件对比，896文件逐字节相同；其余4份是`resume_plan.cpp`、`resume_plan.h`、`resume_plan_android.cpp`及Harmony的`resume_napi.h`，仅前置L3注释。`geb-native-l3-final/verification.json`保存9份原body并逐字节验证，`geb-final-candidate-equivalence.json`进一步证明4份发包文件去除精确注释前缀后与df181原文、已保存body及SHA-256一致，不能称原始C++整文件字节相同。
+
+830项Android及796项Apple保守输入各有3份原始C++文件差异，验证仅上述注释前缀后主体差异为0；HAR92bb、JS/入口和四ABI Android SO均逐字节相同。三宿主消费树及三份历史设备APK/HBC/bundle/SO再次复核，旧运行身份保持；最终4818的完整Harmony构建和设备suite由根平台回执另记。
+
 ## 构建边界修复
 
 主 Metro 观察 SDK 父根时只放行 src/package.json 和当前宿主，避免扫描其他 Example 与原生构建树；守门器同时验证放行/拒绝边界。RN077 生成器补复制 Node 编译配置并移除跨仓类型路径，3项持久回归通过，TEMP `compile-node-ts.js` 实际通过。

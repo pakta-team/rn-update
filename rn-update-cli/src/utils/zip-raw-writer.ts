@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖源 ZIP 中央目录、可读流、CRC/尺寸元数据与文件系统
  * [OUTPUT]: 对外提供 RawZipEntry、fitsRawZip、crc32Update 与 RawZipWriter
- * [POS]: CLI 归档快速重打包底座，原样复制已压缩条目，避免资源二次压缩
+ * [POS]: CLI 归档快速重打包底座，原样复制压缩条目并显式维护落盘偏移，避免重压缩与 WSL 首块覆盖
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -87,7 +87,7 @@ export class RawZipWriter {
   private readonly closed: Promise<void>;
 
   constructor(readonly output: string) {
-    this.out = fs.createWriteStream(output);
+    this.out = fs.createWriteStream(output, { start: 0 });
     this.closed = new Promise<void>((resolve, reject) => {
       this.out.once('close', resolve);
       this.out.once('error', (error) => {

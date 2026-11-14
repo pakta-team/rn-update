@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖原生包精简/条目解析器、yazl 与真实临时 ZIP 读取
+ * [OUTPUT]: 验证 APK/IPA/嵌套 HAP 基线、仅 Android 保留 resources.arsc、raw-copy 与重打包一致性
+ * [POS]: CLI 原生基线制品回归，区分服务端解析保留条目与可参与差分的来源
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import fs from 'fs';
 import os from 'os';

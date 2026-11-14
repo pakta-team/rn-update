@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Node 测试/VM 与 verify-android-so 的真实源码，只读加载四 ABI 发布库
+ * [OUTPUT]: 对外提供 20 项 JNI 定义、四项退役桥消失与逐 ABI 缺导出负控
+ * [POS]: scripts 的 Android 产物接口回归，内存变异验证守卫而不写发布库
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

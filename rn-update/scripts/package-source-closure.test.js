@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Node 测试/临时 tgz、package-candidate 与 package-source-closure 的候选和闭包接口
+ * [OUTPUT]: 对外提供同源候选正控、构建清单/include 篡改、缺源与开发文件负控
+ * [POS]: scripts 的源码闭包回归，测试候选与 checkout 的绑定，不替代三端原生编译
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 const assert = require('node:assert/strict');
 const { execFileSync, spawnSync } = require('node:child_process');
 const { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } = require('node:fs');

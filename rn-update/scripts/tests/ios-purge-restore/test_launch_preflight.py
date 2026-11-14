@@ -1,3 +1,7 @@
+# [INPUT]: 依赖 extract 从真实 Apple 源提取预检/恢复方法与预算常量，由 C++ 编译器运行受限转换
+# [OUTPUT]: 对外提供 14 个预检场景与四类行为突变拒绝回归
+# [POS]: ios-purge-restore 的启动预算宿主，系统 API、dispatch 与提交 IO 为替身，不替代 Foundation 验证
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 import os
 from pathlib import Path
 import re

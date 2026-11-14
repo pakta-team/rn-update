@@ -10,8 +10,8 @@ param([switch]$PlanOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
-$CandidateSha = 'b5ed311d93edb83564357369a10dab59608012351bade92f6125cc6ac55de237'
-$HarSha = 'ee0d33ebd0a469e889279943d4ad69ba4a3ad0b29e7a00a71839382c3f3146a8'
+$CandidateSha = '4818abacdfd97e308b80f8f8bbbb96ade221d58f1135e0a703d7b5069cc06cbf'
+$HarSha = '92bb0c023ca9a4c2160a7ed20db8ea19bf7437b7eac8f2e64733f592935bc9ff'
 $ExpectedProject = 'D:\r\hw1115'
 
 function Require-Environment([string]$Name) {
@@ -131,6 +131,7 @@ $env:RNU_WSL_CLI_ROOT = $LinuxCli.Trim()
 try {
     Invoke-Logged 'stage' $E2e 'node' @($Entry, 'stage')
     Invoke-Logged 'install-e2e' $E2e 'bun' @('install', '--frozen-lockfile')
+    Invoke-Logged 'test-orchestrator' $E2e 'bun' @('run', 'test:harmony-orchestrator')
     Invoke-Logged 'install-app' $App 'bun' @('install', '--frozen-lockfile', '--backend', 'copyfile')
     Invoke-Logged 'install-cli' $Cli 'bun' @('install', '--frozen-lockfile')
     Invoke-Logged 'build-cli' $Cli 'bun' @('run', 'build')

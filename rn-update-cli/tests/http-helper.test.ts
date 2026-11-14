@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 testUrls、runtimeFetch 替身与可控响应时序
+ * [OUTPUT]: 验证空输入、成功优先、延迟并发探测、取消落败请求与全失败首地址回退
+ * [POS]: CLI 端点探测算法回归，只模拟传输而不访问真实服务或代理
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 
 const runtimeFetchMock = mock(() => Promise.resolve({ status: 200 }));

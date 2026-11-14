@@ -17,6 +17,7 @@ const {
   harInventory,
 } = require('./harmony-e2e-inputs');
 const { REQUIRED_HARMONY_TESTS } = require('./harmony-e2e-results');
+const zipFixtures = require('./zip-artifact-fixtures');
 const {
   context,
   main,
@@ -130,7 +131,10 @@ function fixture(t) {
     'v1-to-v2.ppk.patch',
     'to-v4.v2track.ppk.patch',
   ])
-    put(path.join(ctx.artifacts, file));
+    put(
+      path.join(ctx.artifacts, file),
+      file.endsWith('.patch') ? zipFixtures.patch : zipFixtures.full
+    );
   put(
     path.join(ctx.artifacts, 'manifest.json'),
     JSON.stringify({ platform: 'harmony', fullFallback: false })
@@ -316,6 +320,16 @@ test('HAR candidates require full exact SHA256 instead of a release label or pre
     /full SHA256/
   );
   assert.throws(() => assertDigest(ctx.har, '0'.repeat(64), 'HAR'), /mismatch/);
+});
+
+test('a cached false manifest cannot reuse a patch missing its first local header', (t) => {
+  const { ctx, calls } = fixture(t);
+  put(
+    path.join(ctx.artifacts, 'v1-to-v2.ppk.patch'),
+    zipFixtures.patch.subarray(53)
+  );
+  assert.throws(() => main(['diff'], ctx), /Invalid ZIP artifacts/);
+  assert.equal(calls.length, 0);
 });
 
 test('install requires an explicit HDC target and never sends a command to the first device', (t) => {
@@ -755,7 +769,9 @@ test('full test proof binds candidate, HAP and fresh complete results and reject
   assert.equal(fs.existsSync(file), false);
   ctx.run = (...args) => {
     writeResults(...args);
-    put(path.join(ctx.artifacts, 'v1.ppk'), 'concurrent drift');
+    const changed = Buffer.from(zipFixtures.full);
+    changed[10] ^= 1;
+    put(path.join(ctx.artifacts, 'v1.ppk'), changed);
   };
   assert.throws(() => main(['test'], ctx), /inputs changed during/);
   assert.equal(fs.existsSync(file), false);

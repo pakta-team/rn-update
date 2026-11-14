@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 install_record 共享核与 pakta.cpp 的 NAPI 参数、Promise 和导出工具
  * [OUTPUT]: 提供封存、晋升、完整性查询及不可伪造的激活快照桥接
- * [POS]: Harmony 安装防腐层；工作线程执行摘要 IO，主线程在状态提交前同步复核快照，不持有平台状态
+ * [POS]: Harmony 安装防腐层；工作线程执行摘要 IO，主线程提交前复核快照；注册表锁只保护原生快照，不跨越可同步重入的 NAPI 边界
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #pragma once
@@ -113,16 +113,21 @@ static napi_value Queue(napi_env env, Work* w) {
         if (napi_create_external(env, snapshot,
             [](napi_env, void* data, void*) {
               auto* passed = static_cast<Snapshot*>(data);
-              std::lock_guard<std::mutex> guard(snapshots_mutex);
-              snapshots.erase(passed);
+              {
+                std::lock_guard<std::mutex> guard(snapshots_mutex);
+                snapshots.erase(passed);
+              }
               delete passed;
             },
             nullptr, &value) != napi_ok) {
           delete snapshot;
           RejectDeferredWithMessage(env, work->deferred, "install: cannot create snapshot");
         } else {
-          std::lock_guard<std::mutex> guard(snapshots_mutex);
-          snapshots.insert(snapshot);
+          {
+            std::lock_guard<std::mutex> guard(snapshots_mutex);
+            snapshots.insert(snapshot);
+          }
+          // Ark 可同步执行 Promise 后续逻辑；注册表发布完成后必须先解锁。
           napi_resolve_deferred(env, work->deferred, value);
         }
       }
@@ -171,18 +176,23 @@ static napi_value Unchanged(napi_env env, napi_callback_info info) {
     return nullptr;
   }
   auto* s = static_cast<Snapshot*>(data);
-  std::lock_guard<std::mutex> guard(snapshots_mutex);
-  if (snapshots.find(s) == snapshots.end() || s->owner != env) {
-    ThrowError(env, "[SWITCH_VERSION_FAILED] foreign activation snapshot");
-    return nullptr;
-  }
-  try {
-    if (!pakta::install_record::Unchanged(s->dir, kBundle, s->grandfathered, s->passed)) {
-      ThrowError(env, "[SWITCH_VERSION_FAILED] install changed before commit");
-      return nullptr;
+  const char* error = nullptr;
+  {
+    std::lock_guard<std::mutex> guard(snapshots_mutex);
+    if (snapshots.find(s) == snapshots.end() || s->owner != env) {
+      error = "[SWITCH_VERSION_FAILED] foreign activation snapshot";
+    } else {
+      try {
+        if (!pakta::install_record::Unchanged(s->dir, kBundle, s->grandfathered, s->passed)) {
+          error = "[SWITCH_VERSION_FAILED] install changed before commit";
+        }
+      } catch (...) {
+        error = "[SWITCH_VERSION_FAILED] snapshot verification failed";
+      }
     }
-  } catch (...) {
-    ThrowError(env, "[SWITCH_VERSION_FAILED] snapshot verification failed");
+  }
+  if (error) {
+    ThrowError(env, error);
     return nullptr;
   }
   napi_value value = nullptr;

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 ResourceFinder 与自行构造的 Android resources.arsc 二进制块
+ * [OUTPUT]: 验证 UTF-8/UTF-16 资源值、整数/引用条目及非法/截断资源表拒绝
+ * [POS]: CLI Android 资源解析器的格式回归，不依赖平台打包工具或外部 APK
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from 'bun:test';
 import { ResourceFinder } from '../src/utils/app-info-parser/resource-finder';
 

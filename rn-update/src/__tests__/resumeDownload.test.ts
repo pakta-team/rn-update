@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Bun/VM 执行真实 Harmony DownloadTask，并以子进程调用真实共享 C++ resume_plan
+ * [OUTPUT]: 对外提供 206/416、错误体、中断续传与免网络场景回归
+ * [POS]: src 的续传协议宿主，模拟网络及文件 IO，不替代 Harmony 设备或 NAPI 验证
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';

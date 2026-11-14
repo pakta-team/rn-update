@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖生产 native_config、native_round、round_engine 与冻结及 Pakta 本地 JSON 向量
+ * [OUTPUT]: 提供原生配置和轮次回放程序，比较规范期望、命令及 JSON/Value API 并报告断言和失败数
+ * [POS]: update_flow_core 的跨语言契约验证层；仅适配已声明的宿主默认差异，不从被测核心生成期望
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #include <cstdio>
 #include <fstream>
 #include <sstream>

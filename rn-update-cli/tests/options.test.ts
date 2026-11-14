@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 options 的布尔、字符串、可选值和列表读取原语
+ * [OUTPUT]: 验证原始类型转换、缺省值、空值过滤及重复/逗号列表展开
+ * [POS]: CLI 参数归一化的纯函数边界，不承担命令白名单或业务校验
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from 'bun:test';
 import {
   getBooleanOption,

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Bun 转译真实 Harmony UpdateContext.ts，在 VM 中提供存储与原生核替身
+ * [OUTPUT]: 对外提供串行提交、摘要/快照变化、配置代际拒绝及公开切包清理顺序回归
+ * [POS]: src 的 Harmony 提交边界宿主，观察业务写入轨迹而不冒充设备存储或 NAPI 执行
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';

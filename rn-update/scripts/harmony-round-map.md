@@ -73,3 +73,18 @@
 全部日志/备份位于Windows TEMP `pakta-har-release-20261114-115502/`：`baseline-rejected.log`、`build.log`、`build-retry.log`、`guards-real.log`、`candidate-check.json`、`default-check.json`、`llvm.json`、`restoration.log`及`inputs-before.xml`。构建保留API废弃、权限/设备能力和无signingConfig告警，不为消警改业务；未验Harmony设备、完整RNOH宿主、Actions或npm发布候选，不提交、不发布。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
+## 2026-11-15 真实设备激活快照重入修复
+
+首轮完整设备suite以b5ed候选/ee0d HAR执行9项，4 pass/5 fail/0 skip；基座和三项smoke通过，full下载后主线程`THREAD_BLOCK_6S`，其后diff/persistence失败。完整失败输入及日志由根平台回执独立封存，不以宿主或新HAR覆盖旧结果。
+
+故障`librnupdate.so` Build ID为`991b32ae95c5f0a565a6cf1bc15a222230a3e6be`。同Build ID的构建库反汇编表明，设备栈`0x16393`落在`installActivationUnchanged`的`mutex::lock`调用处；完成回调`0x1c4a3`先调用`napi_resolve_deferred`，`0x1c4af`才解同一锁。Ark同步执行Promise后续逻辑，再进入激活校验形成主线程自锁。
+
+`install_napi.h`只调整注册表临界区：插入快照后先解锁再兑现Promise；同步校验在锁内验证注册表、环境归属和真实文件快照，所有抛错及undefined分配移到锁外；finalizer擦除登记后解锁再析构。不使用递归锁，不改变共享安装算法、状态队列、磁盘协议或公开接口。
+
+- 宿主装载器包含真实生产头，在Promise兑现、undefined分配和抛错三个NAPI边界同步调用JS，再进入真实快照校验；重入钩子只属于测试，不进入HAR或npm包。旧生产头新增用例红测：Node内层30秒期限退出124，Bun 0 pass/1 fail；修复后同套件241 checks、1 pass/0 fail，既有篡改、历史marker和错误码断言保留。这是Node NAPI同步重入注入，不代称Ark设备回归。
+- `node scripts/build-harmony-har.js --build-mode release --skip-install`实际DevEco构建成功，29任务/24执行/5复用，Ninja重新编译双ABI。默认HAR SHA-256：`92bb0c023ca9a4c2160a7ed20db8ea19bf7437b7eac8f2e64733f592935bc9ff`；arm64-v8a SO：`5bdce4754c883e48c123d5bb908492358361c70d9a1837f9179d779622bd840c`；x86_64 SO：`4894e00768ee2e761d45df6d675b35c38078cf17026b7edd64605ed684c2dc7f`。
+- 直接HAR闸门验证1.1.0/release/DEBUG=false、21份ETS逐字节、双ABI各21注册及4库禁串；真实HAR5项、禁串4项均通过，0 skip；LLVM另核双ABI17安装配置轮次注册、内部未解析引用0。源BuildProfile/oh-package构建后与构建前摘要一致，暂存android-generated目录已清理。
+- 原失败及修复证据位于`TEMP/pakta-platform-validation-20261114/harmony-snapshot-deadlock/`；新候选打包、短工程/HAP消费和完整设备重跑由根代理随后独立登记。新HAR通过不使旧b5ed设备结果转绿，不代表完整平台发布准入。
+
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

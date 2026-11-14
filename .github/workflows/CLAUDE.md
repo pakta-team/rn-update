@@ -8,7 +8,7 @@ CI 编排层。YAML 工作流把 npm/bun 校验、Android/iOS/Harmony E2E、发�
 ci-failure-email.yml: 常规分支失败 run 的 issue 通知与恢复关闭；codex/verify- 验证分支不创建、评论或关闭 issue
 cli.yml: master/main/codex验证分支 push 与 CLI 相关 PR 执行静态/单测、精确 Node 18.17 smoke、固定四组 Hermes 编译器与夹具 Hash 验证及 seeded fuzz；接线不代表远端已通过
 e2e_android.yml: 先重建四 ABI SO 并发布 SHA256SUMS，设备矩阵下载校验同轮产物；RN077 以同轮 SO/声明生成显式 tgz并由构建前后守卫绑定旧架构；emulator action 的独立 shell 以绝对 workspace 路径定位宿主，不依赖 run 默认目录
-e2e_harmony.yml: 保留Mac手动构建/设备链；Windows仅精确codex/verify-harmony-win-20261115 push或显式dispatch windows，唯一runner label、source隔离checkout和全新D:\r\hw1115，固定候选/HAR后跑双ABI Release、WSL真差分与完整设备suite
+e2e_harmony.yml: 保留Mac手动构建/设备链；Windows仅精确codex/verify-harmony-win-20261115 push或显式dispatch windows，唯一runner label、source隔离checkout和全新D:\r\hw1115，固定4818最终GEB候选/92bb HAR后跑双ABI Release、WSL真差分与完整设备suite
 e2e_ios.yml: iOS 模拟器 core/native 两组更新链路，显式单worker且保留一次重试；CLI输入触发，受信main/master core才写每日内容缓存；app保留原生精确key，命中后显式bash读644刷新脚本
 expo_build.yml: Expo57/RN0.86.3 Android/iOS Release 源码消费编译；隔离本地 SDK 并断言依赖归宿主，prebuild 后编译 Kotlin/Swift/共享核，Apple 显式确认 Expo subspec、bundleURL flag 与 Delegate 注册；不代表设备更新或发布候选
 lint.yml: master/main 的 PR/push 与 codex验证分支 push 执行 SDK Biome、TypeScript、Harmony 声明和 Native Spec 一致性检查
@@ -38,6 +38,10 @@ GitHub API 实查 `pakta-team/rn-update` 默认 main，main/master 当时均为 
 
 本轮 `actionlint v1.7.12` 对七份变更 workflow 返回0，86段 run 经 WSL `bash -n` 通过；分支匹配、无 push 发布及两个通知 guard 已校验。还未推送输入、dispatch 或执行本轮远端 run，后续必须以实际 SHA、run/job URL 与产物更新状态。
 
+2026-11-15 Harmony设备full后发现原生快照锁同步重入，修复后Windows workflow及PS入口固定改为df181候选/92bb Release HAR；原b5ed/ee0d离线报告和设备4pass/5fail结果不改写。新输入在含空格物理source夹具的PlanOnly通过，旧候选摘要、旧HAR摘要及旧候选文件三个负控均以预期原因拒绝；PS AST/actionlint通过，不创建真实D:\r\hw1115、不启动runner或设备。新证据位于TEMP/pakta-platform-validation-20261114/harmony-snapshot-deadlock/windows-ci-df181-verification.json；运行时env须同时切换候选路径，最终设备与Actions结果由根平台回执登记。
+
+最终GEB候选补4份发包C++头注释后，Windows两入口固定切为4818/92bb，默认HAR未重建；旧df181记录保留为历史。本机phase wrapper单独使用`harmony-finalcandidate`日志和显式reuse1，复用此前已真实通过的92bb OHPM/HAP输入守门；远程Windows入口仍按全新工程默认刷新依赖，不以复用替代构建。4818的PlanOnly与旧候选拒绝、输入等价证据另写TEMP/pakta-platform-validation-20261114/harmony-finalcandidate，不覆盖前轮。
+
 ## 2026-11-14 真实 Actions 首轮补缺
 
 安全 orphan 验证提交 `d170c04522c2a5ebe059c729b04be04bf3e88d7a` 已推 `codex/verify-upstream-sync-20261114`，仅含公开 SDK/CLI/CI 和两份子模块引用，没有本地 monorepo 历史。首轮 lint 与 CLI 七个 job 通过；其它平台存在真实失败，不能沿用历史发布结果。Android SDK setup 旧默认包 `tools` 已在仓库失效，test/Expo 入口显式安装 `platform-tools`；HAR 容器已真实完成构建，但随后验证缺少 Python，验证前补安装 Python3；flow replay 改显式 `bash`，兼容 Windows 检出后脚本的普通文件模式。Mac Foundation 提取缺口及 JDK 25 native-access 修复见 SDK 测试地图。其余失败继续逐项修复，首轮原始 jobs/log 保存在 `TEMP/pakta-platform-validation-20261114`，本段不称矩阵通过。
@@ -55,6 +59,10 @@ tvOS新增真实macos-26/Xcode26.4 job：固定RN-tvos0.85.3-3/React19.2.3，独
 ## 2026-11-15 Android 第二轮入口修复
 
 4660a4b 的四 ABI 构建、RN077 候选安装及旧架构 Release 编译已通过；core/debug 在进入 Gradle 前因 `spawnSync ./gradlew EACCES` 失败，RN077 在模拟器成功启动后因 action shell 从仓库根执行相对 `cd` 失败，尚未运行设备 suite。`run-gradle.js` 的 Unix 分支改由 sh 读取 wrapper，不依赖 Windows 检出丢失的执行位；三个 emulator action 的设备命令及 Metro 失败日志路径均显式使用 GITHUB_WORKSPACE。WSL 实际执行无执行位 wrapper，含空格 cwd、空格与 shell 特殊字面参数及原始退出码23均通过；YAML、三段action Bash语法及五条Detox命令保留校验通过，见 `TEMP/pakta-platform-validation-20261114/android-entry-fix-verification.json`。新的真实设备结果须由后续 run 另证。
+
+## 2026-11-15 Package 第三轮 Ruby 入口修复
+
+b567c1535ac7 的 Release HAR 构建及验证已成功；后继 package-check 在任何规格/pack/声明消费检查前，因 ubuntu-latest 切到 26.04 后没有 Ruby3.2.3 预编译包而失败。setup-ruby 原始错误明确列出 3.2.11 可用，现固定为同系列精确补丁版 3.2.11，保留 CocoaPods1.16.2 与全部包检查步骤。job132528387705 原日志保留；修改仅为工具链入口修复，不回记第三轮 package 已通过，后续新 SHA 仍须实际执行完整 job。
 
 ## 2026-11-15 Windows Harmony 临时 runner 入口
 

@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# ============================================================================
+# [INPUT]: 依赖仓库外临时目录、固定 Node/Bun/Hermes 下载、真实 Metro 夹具与冻结 CLI 锁
+# [OUTPUT]: 产出四组 HBC 回归/fuzz、lint/build、Node18 smoke/异步边界日志及下载摘要
+# [POS]: T24 隔离 Linux 验证编排器，复制当前 CLI 后执行；不消费或修改开发者安装树
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+# ============================================================================
 set -euo pipefail
 
 source_root="$(cd "$(dirname "$0")/.." && pwd)"

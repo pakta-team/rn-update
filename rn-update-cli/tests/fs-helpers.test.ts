@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 fs-helpers 原语、Node 文件系统与每例独立临时目录
+ * [OUTPUT]: 验证目录创建/清空、存在性、删除、移动覆盖及读取失败透传
+ * [POS]: CLI 轻量文件系统回归，锁定替代 fs-extra 后的实际磁盘语义
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import fs from 'fs';
 import os from 'os';

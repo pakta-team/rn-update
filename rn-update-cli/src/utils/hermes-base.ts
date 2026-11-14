@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 Node 子进程/文件流/HTTP Range、Pakta CLI 临时目录、ZIP 读取原语、raw HBC 审计器、failure-fingerprint 脱敏指纹与 hermes-cached-object 归一化器
  * [OUTPUT]: 对外提供 Hermes base 选择、缓存、下载、完整语义等价校验、清理及发布元数据能力
- * [POS]: CLI Hermes delta 优化边界，所有失败降级到普通编译，不阻塞发布流程
+ * [POS]: CLI Hermes delta 优化边界，下载/审计落盘显式维护偏移；所有失败降级到普通编译，不阻塞发布流程
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -652,7 +652,7 @@ async function saveResponse(
     await pipeline(
       Readable.fromWeb(response.body as any),
       watchdog,
-      fs.createWriteStream(destination),
+      fs.createWriteStream(destination, { start: 0 }),
       { signal: controller.signal },
     );
   } finally {
@@ -1370,7 +1370,9 @@ class DumpReader {
     const pass = (this.pass = new PassThrough());
     proc.stdout!.pipe(pass);
     if (dumpTo) {
-      const output = (this.debugOutput = fs.createWriteStream(dumpTo));
+      const output = (this.debugOutput = fs.createWriteStream(dumpTo, {
+        start: 0,
+      }));
       this.debugFinished = new Promise<void>((resolve) => {
         output.once('finish', resolve);
         output.once('error', (error) => {

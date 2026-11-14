@@ -33,6 +33,8 @@ CLI-09 续核：auto-update 复用用户缓存目录、环境开关和 PackageMa
 
 CLI-11 入口补验（2026-11-15）：历史 package 函数层的 JSON 断言未覆盖 bin 的账号/版本前后缀，本轮修复四个 parseApp/Apk/Ipa/Aab 入口，真实四格式已登录子进程 stdout 均可直接 JSON.parse 且不请求网络；普通 apps 对照仍显示缓存账号与版本。版本 banner 回注负控在 JSON.parse 失败，修复后全量 661 pass/69 skip/0 fail、typecheck/build/Node22 smoke 与定向 Biome 通过，证据在 TEMP/pakta-cli-json-20261115；不把此前三个 mocked parser 断言记为完整入口已验。
 
+CLI-12 ZIP 落盘补验（2026-11-15）：WSL 挂载盘在 Node 隐式 write→writev 切换时覆盖首块，五处文件输出统一显式维护从零开始的写偏移。Node 烟雾集成确定性故障注入，buffer/file 首条和 manifest 均逐字节验证，移除修复的负控必败；相关回归 61 pass/19 skip、lint/build/Node22 smoke 与 WSL Node18 偏移回归通过。Harmony 真差分重新生成后五个归档 local header/CRC、两条单流/HDIFF13 还原均通过，完整 PPK 原字节不变；证据在 TEMP/pakta-harmony-zip-investigation-20261115，设备验收由 SDK 平台流程另记。
+
 法则: 包内身份优先·buildTime 不透明·dry-run 零写入·凭据按服务地址隔离
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

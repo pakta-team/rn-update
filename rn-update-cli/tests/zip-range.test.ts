@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 ZIP Range 读取器、Hermes base 获取、真实 ZIP 与隔离 HTTP Range 服务
+ * [OUTPUT]: 验证条目定位/缓存请求预算、对象验证器、Range 回退、Hash 失败封闭和传输期限
+ * [POS]: CLI 远程基线读取的传输回归，以本地服务校验实际字节与请求次序
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import fs from 'fs-extra';
 import os from 'os';

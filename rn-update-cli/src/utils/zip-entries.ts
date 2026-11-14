@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 node:fs、fs-helpers 的目录创建/清理、临时目录、路径、流式管道与 ZIP 条目元数据
  * [OUTPUT]: 对外提供 ZIP 条目读取、写入、前缀读取和枚举能力
- * [POS]: CLI 归档基础设施，统一本地/嵌套 ZIP 的资源访问和临时目录生命周期
+ * [POS]: CLI 归档基础设施，统一 ZIP 资源生命周期；落盘显式维护偏移，避免 WSL 挂载盘混合 write/writev 覆盖首块
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -54,7 +54,7 @@ export async function writeEntry(
   ensureDirSync(path.dirname(outputPath));
   await pipeline(
     await openEntryStream(entry, zipFile),
-    fs.createWriteStream(outputPath),
+    fs.createWriteStream(outputPath, { start: 0 }),
   );
 }
 
@@ -157,7 +157,7 @@ export async function extractFirstEntry(
 export function createOutputZip(output: string) {
   ensureDirSync(path.dirname(output));
   const zipfile = new YazlZipFile();
-  const writeStream = fs.createWriteStream(output);
+  const writeStream = fs.createWriteStream(output, { start: 0 });
   const writePromise = new Promise<void>((resolve, reject) => {
     zipfile.outputStream.on('error', reject);
     // without this, a full disk / read-only target left the promise pending

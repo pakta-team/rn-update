@@ -5,6 +5,16 @@ CLI 命令、服务端适配与原生包身份解析。`api.ts` 是唯一 HTTP/�
 
 成员清单
 
+CLAUDE.md: CLI 命令层成员与业务边界地图
+account-worker.ts: detached 账号快照刷新进程，在期限内读取会员接口并以隔离权限原子更新缓存
+account.ts: 常规命令的账号与续费提示，优先消费按 cwd/token 隔离的缓存并派发后台刷新
+cache.ts: Hermes base 缓存统计与显式清理命令，具体路径和回收规则委托 utils/hermes-base
+commands.ts: 惰性命令注册表，仅在调用时加载相应业务组，减少入口依赖与启动开销
+exports.ts: 包级公共 API 聚合出口，保持会话、应用、差分、Provider 与公开类型的导入契约
+install.ts: 校验依赖包参数后委托当前包管理器安装，拒绝 shell 元字符，不直接修改发布模型
+bundle.ts: bundle 命令编排入口，组合参数、应用选择、runner、PPK 和发布，不承担压缩或传输实现
+bundle-pack.ts: PPK 归档边界，复用 ZIP 压缩策略将已生成的 bundle 目录打包，不运行 Metro 或上传
+symbolicate.ts: 根据服务端版本 source map 将 bundle 栈映射回源码，兼容压缩归档与本地读取
 api.ts: 会话认证、旧服务兼容请求、独立 Go API 管理路径、CLI 会员权益与 Hermes base/渠道边界；上传统一代理、按分片大小限定期限、重试流重建和进度回滚，GCS 保持并行与旧服务整文件回退，standalone 保持串行 PUT、对象/会话定位及原始 ETag complete/失败 abort 语义
 bin.ts: Pakta 进程入口，统一参数解析、会话恢复、动态命令分发、顶层错误输出与本地化过期构建提示；四个 parseApp/Apk/Ipa/Aab 命令跳过账号 worker、版本提示及自更新，使 stdout 只有 JSON；源码仓库中的 src 比 lib 新时立即拒绝执行并要求重建，防止旧编译产物写入旧发布模型
 app.ts: 应用选择/CRUD、渠道 CRUD 与缺失渠道幂等创建，持久化 appId/appKey；独立服务创建时把 downloadUrl 映射到 default 渠道 nativePackageUrl（遗留数字服务保持数字 appId 契约，独立服务支持 Go 服务生成的 UUIDv7），渠道命令输出统一走本地化资源
@@ -32,4 +42,6 @@ utils/slim-sourcemap.ts: 归档 source map 的跨平台路径归一化、依赖�
 
 渠道身份边界：app.ts 的 findChannel 为上传、显式 target 和交互筛选共用只读解析器，精确 code 优先，仅无精确命中时允许唯一大小写兼容；歧义拒绝，不依赖列表顺序。package.ts 保留包内 channel 大小写，--channel 严格断言原值。standalone-publish.ts 先对整批目标完成渠道/版本/rollout 预检，再创建缺失渠道，避免后续歧义留下前序写入。服务端创建接口强制小写，故缺失混合大小写身份在 CLI 写前失败，不自动创建替代身份；已有历史 Beta/beta 按原 code/ID 解析，兼容命中不改包内值。
 
-法则: 业务命令不直接拼 HTTP 细节；独立服务不回退上游默认地址；[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+法则: 业务命令不直接拼 HTTP 细节；独立服务不回退上游默认地址
+
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

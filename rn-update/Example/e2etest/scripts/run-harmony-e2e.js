@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * [INPUT]: 依赖显式候选 tgz/HAR 摘要、依赖/结果门卫、DevEco、Harmony 工程、hdc 目标与既有 prepare/WSL/Jest 入口
+ * [INPUT]: 依赖显式候选 tgz/HAR 摘要、依赖/ZIP/结果门卫、DevEco、Harmony 工程、hdc 目标与既有 prepare/WSL/Jest 入口
  * [OUTPUT]: 提供分阶段 Harmony 命令、真实差分门禁及候选/HAR/base/HAP/设备身份与全套通过证明
  * [POS]: e2etest 跨平台 Harmony 编排层；物理隔离候选避免根 RN 污染，构建与设备入口共用，不持有签名或实现更新逻辑
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -20,6 +20,7 @@ const {
   stageSdk,
 } = require('./harmony-e2e-sdk');
 const { assertReusableDependencies } = require('./harmony-e2e-inputs');
+const { verifyArtifactSetSync } = require('./verify-update-artifacts');
 const {
   assertHdcInstallSuccess,
   assertHarmonyTestResults,
@@ -100,6 +101,7 @@ function assertArtifacts(ctx, real = true) {
     );
   for (const file of real ? REQUIRED_ARTIFACTS : ['v1.ppk', 'v2.ppk', 'v4.ppk'])
     requireFile(path.join(ctx.artifacts, file));
+  verifyArtifactSetSync(ctx.artifacts, 'harmony', real);
   return manifest;
 }
 

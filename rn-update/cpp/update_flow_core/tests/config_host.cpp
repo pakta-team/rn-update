@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖生产 native_config、round_engine 与 flow_json 的归一化、门禁、等价和取消判断
+ * [OUTPUT]: 提供 stdin JSON 操作到 stdout JSON 结果的测试进程接口，无效输入或操作以非零退出码拒绝
+ * [POS]: update_flow_core 的配置专项宿主；供 TypeScript 回归跨进程调用真实共享核，不复制规则或平台 IO
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #include <iostream>
 #include <iterator>
 #include "../native_config.h"

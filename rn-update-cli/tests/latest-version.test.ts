@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 getLatestVersions、registry/auth/HTTP/代理替身、固定时钟与隔离缓存
+ * [OUTPUT]: 验证 scope 编码和认证代理、缓存期限/跨 registry 隔离及网络/响应/写入失败回退
+ * [POS]: CLI npm latest 查询的传输与缓存契约回归，不访问真实 registry
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import {
   afterEach,
   beforeEach,

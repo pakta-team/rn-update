@@ -43,7 +43,7 @@ npm run harmony:e2e -- test
 - `prepare` 复用已有制品准备器。Windows 先生成 v1/v2/v4 full 输入并显式标记 `fullFallback=true`，此时不能作为真实差分证明；已就绪时可设置 `RNU_E2E_SKIP_PREPARE=true`。
 - `base` 先同步候选，再运行样例原有 `bundle-harmony --dev false --entry-file e2e/entry.base.ts`。制品准备会覆写 rawfile bundle，所以此阶段必须在 `prepare` 之后。对独立短工程，只同步 rawfile、显式 HAR、SDK Hvigor 插件，改写该副本的本地依赖和 `PAKTA_CPP_DIR` 引用；后者指向当前 SDK native glue 并由构建门禁复核，源工程与签名不变。
 - `build` 要求显式候选 tgz 完整摘要及 `arm64-v8a` 与 `x86_64` 两个 ABI。它先验证已暂存 HAR 与 Hvigor 插件的摘要，只清理确认仍位于显式工程内的 `oh_modules` 和 `entry/oh_modules` 两个生成目录，再 `ohpm install --all`，固定 `buildMode=release` 构建并要求 signed HAP 存在。链接指向工程外时拒绝清理。成功后在制品目录写 `harmony-build-inputs.json`，绑定完整 tgz、工程、生产源码、HAR、插件、base bundle 与 HAP 摘要；即使只改变非 Harmony 文件的新候选也必须重建证明。
-- `diff` 不运行 Metro，不再覆写 base bundle；它在 HAP 构建后复用 `generate-platform-diffs-wsl.cjs` 生成真实 PPK 与 v2-track patch。原生平台的准备器若已产出真实差分，只验证并复用。
+- `diff` 不运行 Metro，不再覆写 base bundle；它在 HAP 构建后生成真实 PPK 与 v2-track patch。生成器先将既有 false 证明改为 true，再逐一验证所有 full/patch，全部成功才提交 false。复用既有 false 同样重新校验 ZIP，坏包直接拒绝，不自动修复或执行设备命令。
 - `install` 要求显式 `HDC_TARGET`，先复核构建摘要未过时，再只对该目标执行 `install -r`，必须得到 `App installed successfully` 且不含 Fail/Error/unsuccessfully，写入 `harmony-install-inputs.json` 绑定目标、完整 tgz 与 HAP。证书变化时由调用方明确对同一目标卸载旧应用后重试；脚本不会自动选择第一台设备或卸载其它包。
 - `test` 固定完整 Harmony Jest runner，不接受任何附加参数或过滤。它强制跳过 global prepare，要求 `manifest.platform=harmony`、`fullFallback===false` 且真实 patch 非空，复核构建/安装证明与当前 tgz/HAP/目标一致，先写 `harmony-run-inputs.json` 并清除旧结果和旧成功证明。Jest 必须输出本次 `harmony-jest-results.json`，当前工程的业务六项及 smoke 三项全部 passed、无 skip/todo，且运行后输入摘要未变，才写 `harmony-test-inputs.json` 绑定候选/HAP/制品、结果 SHA256 与通过数量；命令退出零不足以通过。
 - `check` 检查候选、物理 SDK、依赖、构建摘要与真实制品并输出当前摘要；它不代表设备用例已通过。
@@ -65,11 +65,11 @@ $env:RNU_WSL_HDIFF_ROOT = '/path/to/linux/node_modules'
 npm run harmony:e2e -- diff
 ```
 
-脚本经 `wslpath` 转换当前实际制品目录与生成器路径，并用独立 argv 传入 `wsl.exe --exec env ...`，不拼接 shell 命令。生成器明确采用 Harmony 的 v2→v4 基线。`manifest.fullFallback=false` 是必要门禁，不能以 Jest 绿色或 full 包下载成功替代。
+脚本经 `wslpath` 转换当前实际制品目录与生成器路径，并用独立 argv 传入，不拼接 shell 命令。生成器明确采用 Harmony 的 v2→v4 基线。共享门卫依赖样例已锁定的 node-stream-zip，不读取整份大包：定位读取 local/central/descriptor，逐条流式计算实际大小与 CRC，验证中央目录连续跨度和 EOCD 精确边界，要求非空 bundle/patch 与合法 __diff.json。沿用 SDK contract.json 的归档、单条、总展开量、数量与压缩比预算，元数据和实际流各自限额；同步编排通过有期限子进程调用同一门卫。fullFallback=false 必须与完整 ZIP 门卫同时成立。
 
 ## 验证与证据边界
 
-`npm run test:harmony-orchestrator` 使用 Node 内置测试器跑编排与结果两组持久正负控，验证候选/安装身份、隔离、真实差分、设备和清理边界、严格 HAR 复用及完整测试证明；覆盖失败安装文本、过滤/缺失/skip/错工程、陈旧 JSON 和测试中输入漂移。复用失败必须零命令并保留依赖。它不调用真实 Hvigor、模拟器或设备，不能冒充 HAP/真实差分/E2E 通过。
+`npm run test:harmony-orchestrator` 跑编排、结果与 ZIP 三组持久 Node 正负控；新增缺首53字节、local/central/descriptor/CRC、必需条目、清单形状、解压预算和旧 false 重生失败负控。复用坏 ZIP 与坏 HAR 均须零设备命令拒绝。Windows runner 在冻结安装样例依赖后先执行本命令；测试不调用真实 Hvigor、模拟器或设备，不冒充平台通过。
 
 设备套件使用本地 `31337` 端口，与 Android 本地 E2E 必须顺序运行；构建阶段可以并行。业务六项逐阶段校验 current-hash、lastError 和原生 getUpdateMetadata().rolledBackVersion，重启后仍要求 v4/hash 一致且无错误/回滚。增加观测 UI 后须重新 prepare→base→build→diff；旧 HAP 缺字段应失败。实际通过仍需记录候选/HAR 摘要、构建日志、`check`、设备目标、Jest JSON 与成功证明。现有 `LOCAL_WINDOWS_TEST.md` 保留机器路径手册，本文记录共用入口。
 

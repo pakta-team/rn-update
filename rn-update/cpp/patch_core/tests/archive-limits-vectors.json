@@ -1,0 +1,13 @@
+{"vectors":[
+  {"size":0,"compressed":0,"name":"empty","ok":true},
+  {"size":1048576,"compressed":0,"name":"threshold","ok":true},
+  {"size":1048577,"compressed":0,"name":"bomb","ok":false},
+  {"size":2000000,"compressed":20000,"name":"ratio100","ok":true},
+  {"size":2000001,"compressed":20000,"name":"ratio100plus","ok":false},
+  {"size":-1,"compressed":1,"name":"unknown","ok":false},
+  {"size":536870913,"compressed":536870913,"name":"large","ok":false},
+  {"size":0,"compressed":0,"name":"nested/.pakta-complete","ok":false},
+  {"size":0,"compressed":0,"name":"nested\\.pakta-temp","ok":false},
+  {"size":0,"compressed":0,"name":".pushy-complete","ok":true},
+  {"size":0,"compressed":0,"name":"link","symlink":true,"ok":false}
+]}

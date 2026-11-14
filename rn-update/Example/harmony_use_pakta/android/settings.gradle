@@ -1,0 +1,8 @@
+// [INPUT]: RN settings plugin、native_modules.gradle 与 app 模块。
+// [OUTPUT]: 定义 harmony_use_pakta Android 根工程及自动链接拓扑。
+// [POS]: RN Android 构建入口，与 Harmony HAP 工程并列存在。
+// [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+rootProject.name = 'harmony_use_pakta'
+apply from: file("../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesSettingsGradle(settings)
+include ':app'
+includeBuild('../node_modules/@react-native/gradle-plugin')

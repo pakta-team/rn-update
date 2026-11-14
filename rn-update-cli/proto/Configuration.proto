@@ -1,0 +1,183 @@
+syntax = "proto3";
+
+package aapt.pb;
+
+option java_package = "com.android.aapt";
+
+message Configuration {
+  enum LayoutDirection {
+    LAYOUT_DIRECTION_UNSET = 0;
+    LAYOUT_DIRECTION_LTR = 1;
+    LAYOUT_DIRECTION_RTL = 2;
+  }
+
+  enum ScreenLayoutSize {
+    SCREEN_LAYOUT_SIZE_UNSET = 0;
+    SCREEN_LAYOUT_SIZE_SMALL = 1;
+    SCREEN_LAYOUT_SIZE_NORMAL = 2;
+    SCREEN_LAYOUT_SIZE_LARGE = 3;
+    SCREEN_LAYOUT_SIZE_XLARGE = 4;
+  }
+
+  enum ScreenLayoutLong {
+    SCREEN_LAYOUT_LONG_UNSET = 0;
+    SCREEN_LAYOUT_LONG_LONG = 1;
+    SCREEN_LAYOUT_LONG_NOTLONG = 2;
+  }
+
+  enum ScreenRound {
+    SCREEN_ROUND_UNSET = 0;
+    SCREEN_ROUND_ROUND = 1;
+    SCREEN_ROUND_NOTROUND = 2;
+  }
+
+  enum WideColorGamut {
+    WIDE_COLOR_GAMUT_UNSET = 0;
+    WIDE_COLOR_GAMUT_WIDECG = 1;
+    WIDE_COLOR_GAMUT_NOWIDECG = 2;
+  }
+
+  enum Hdr {
+    HDR_UNSET = 0;
+    HDR_HIGHDR = 1;
+    HDR_LOWDR = 2;
+  }
+
+  enum Orientation {
+    ORIENTATION_UNSET = 0;
+    ORIENTATION_PORT = 1;
+    ORIENTATION_LAND = 2;
+    ORIENTATION_SQUARE = 3;
+  }
+
+  enum UiModeType {
+    UI_MODE_TYPE_UNSET = 0;
+    UI_MODE_TYPE_NORMAL = 1;
+    UI_MODE_TYPE_DESK = 2;
+    UI_MODE_TYPE_CAR = 3;
+    UI_MODE_TYPE_TELEVISION = 4;
+    UI_MODE_TYPE_APPLIANCE = 5;
+    UI_MODE_TYPE_WATCH = 6;
+    UI_MODE_TYPE_VR_HEADSET = 7;
+  }
+
+  enum UiModeNight {
+    UI_MODE_NIGHT_UNSET = 0;
+    UI_MODE_NIGHT_NIGHT = 1;
+    UI_MODE_NIGHT_NOTNIGHT = 2;
+  }
+
+  enum Touchscreen {
+    TOUCHSCREEN_UNSET = 0;
+    TOUCHSCREEN_NOTOUCH = 1;
+    TOUCHSCREEN_STYLUS = 2;
+    TOUCHSCREEN_FINGER = 3;
+  }
+
+  enum KeysHidden {
+    KEYS_HIDDEN_UNSET = 0;
+    KEYS_HIDDEN_KEYSEXPOSED = 1;
+    KEYS_HIDDEN_KEYSHIDDEN = 2;
+    KEYS_HIDDEN_KEYSSOFT = 3;
+  }
+
+  enum Keyboard {
+    KEYBOARD_UNSET = 0;
+    KEYBOARD_NOKEYS = 1;
+    KEYBOARD_QWERTY = 2;
+    KEYBOARD_12KEY = 3;
+  }
+
+  enum NavHidden {
+    NAV_HIDDEN_UNSET = 0;
+    NAV_HIDDEN_NAVEXPOSED = 1;
+    NAV_HIDDEN_NAVHIDDEN = 2;
+  }
+
+  enum Navigation {
+    NAVIGATION_UNSET = 0;
+    NAVIGATION_NONAV = 1;
+    NAVIGATION_DPAD = 2;
+    NAVIGATION_TRACKBALL = 3;
+    NAVIGATION_WHEEL = 4;
+  }
+
+  enum GrammaticalGender {
+    GRAMMATICAL_GENDER_UNSET = 0;
+    GRAMMATICAL_GENDER_NEUTER = 1;
+    GRAMMATICAL_GENDER_FEMININE = 2;
+    GRAMMATICAL_GENDER_MASCULINE = 3;
+  }
+
+  // Mobile country code.
+  uint32 mcc = 1;
+
+  // Mobile network code.
+  uint32 mnc = 2;
+
+  // Locale.
+  string locale = 3;
+
+  // Layout direction.
+  LayoutDirection layout_direction = 4;
+
+  // Screen width in dp.
+  uint32 screen_width = 5;
+
+  // Screen height in dp.
+  uint32 screen_height = 6;
+
+  // Smallest screen width in dp.
+  uint32 smallest_screen_width = 7;
+
+  // Screen layout size.
+  ScreenLayoutSize screen_layout_size = 8;
+
+  // Screen layout long.
+  ScreenLayoutLong screen_layout_long = 9;
+
+  // Screen round.
+  ScreenRound screen_round = 10;
+
+  // Wide color gamut.
+  WideColorGamut wide_color_gamut = 11;
+
+  // HDR.
+  Hdr hdr = 12;
+
+  // Orientation.
+  Orientation orientation = 13;
+
+  // UI mode type.
+  UiModeType ui_mode_type = 14;
+
+  // UI mode night.
+  UiModeNight ui_mode_night = 15;
+
+  // Density in dpi.
+  uint32 density = 16;
+
+  // Touchscreen.
+  Touchscreen touchscreen = 17;
+
+  // Keys hidden.
+  KeysHidden keys_hidden = 18;
+
+  // Keyboard.
+  Keyboard keyboard = 19;
+
+  // Nav hidden.
+  NavHidden nav_hidden = 20;
+
+  // Navigation.
+  Navigation navigation = 21;
+
+  // SDK version.
+  uint32 sdk_version = 22;
+
+  // Product.
+  string product = 23;
+
+  // Grammatical gender.
+  GrammaticalGender grammatical_gender = 24;
+}

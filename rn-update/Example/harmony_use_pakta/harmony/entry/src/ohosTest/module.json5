@@ -1,0 +1,19 @@
+/**
+ * [INPUT]: 依赖 HarmonyOS ohosTest 模块模型与 Hypium 测试运行时
+ * [OUTPUT]: 声明设备集成测试模块、设备类型与安装策略
+ * [POS]: entry 设备测试边界，与 src/main 运行时模块隔离部署
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+{
+  "module": {
+    "name": "entry_test",
+    "type": "feature",
+    "deviceTypes": [
+      "phone",
+      "tablet",
+      "2in1"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false
+  }
+}

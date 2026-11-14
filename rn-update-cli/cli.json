@@ -1,0 +1,525 @@
+{
+  "useCommand": true,
+  "defaultCommand": "help",
+  "commands": {
+    "help": {},
+    "login": {},
+    "logout": {},
+    "me": {},
+    "createApp": {
+      "options": {
+        "name": {
+          "hasValue": true
+        },
+        "platform": {
+          "hasValue": true
+        }
+      }
+    },
+    "apps": {
+      "options": {
+        "platform": {
+          "hasValue": true
+        },
+        "appId": {
+          "hasValue": true
+        },
+        "config": {
+          "hasValue": true
+        },
+        "json": {
+          "default": false
+        }
+      }
+    },
+    "channels": {
+      "options": {
+        "appId": { "hasValue": true },
+        "platform": { "hasValue": true },
+        "config": { "hasValue": true },
+        "json": { "default": false }
+      }
+    },
+    "createChannel": {
+      "options": {
+        "appId": { "hasValue": true },
+        "platform": { "hasValue": true },
+        "config": { "hasValue": true },
+        "code": { "hasValue": true },
+        "name": { "hasValue": true },
+        "nativePackageUrl": { "hasValue": true },
+        "paused": { "default": false },
+        "json": { "default": false }
+      }
+    },
+    "updateChannel": {
+      "options": {
+        "code": { "hasValue": true },
+        "name": { "hasValue": true },
+        "nativePackageUrl": { "hasValue": true },
+        "paused": { "default": false },
+        "json": { "default": false }
+      }
+    },
+    "deleteChannel": {},
+    "deleteApp": {
+      "options": {
+        "platform": {
+          "hasValue": true
+        }
+      }
+    },
+    "selectApp": {
+      "options": {
+        "platform": {
+          "hasValue": true
+        }
+      }
+    },
+    "uploadIpa": {
+      "options": {
+        "version": {
+          "hasValue": true
+        },
+        "channel": {
+          "hasValue": true
+        }
+      }
+    },
+    "uploadApk": {
+      "options": {
+        "version": {
+          "hasValue": true
+        },
+        "channel": {
+          "hasValue": true
+        }
+      }
+    },
+    "uploadAab": {
+      "options": {
+        "version": {
+          "hasValue": true
+        },
+        "channel": {
+          "hasValue": true
+        },
+        "includeAllSplits": {
+          "default": false
+        },
+        "splits": {
+          "hasValue": true
+        }
+      }
+    },
+    "uploadApp": {
+      "options": {
+        "version": {
+          "hasValue": true
+        },
+        "channel": {
+          "hasValue": true
+        }
+      }
+    },
+    "parseApp": {},
+    "parseIpa": {},
+    "parseApk": {},
+    "parseAab": {},
+    "extractApk": {
+      "options": {
+        "output": {
+          "hasValue": true
+        },
+        "includeAllSplits": {
+          "default": false
+        },
+        "splits": {
+          "hasValue": true
+        }
+      }
+    },
+    "packages": {
+      "options": {
+        "platform": {
+          "hasValue": true
+        }
+      }
+    },
+    "deletePackage": {
+      "options": {
+        "appId": {
+          "hasValue": true
+        },
+        "packageVersion": {
+          "hasValue": true
+        },
+        "packageId": {
+          "hasValue": true
+        },
+        "packageIds": {
+          "hasValue": true
+        }
+      }
+    },
+    "publish": {
+      "options": {
+        "platform": {
+          "hasValue": true
+        },
+        "name": {
+          "hasValue": true
+        },
+        "description": {
+          "hasValue": true
+        },
+        "metaInfo": {
+          "hasValue": true
+        },
+        "diffFromHash": {
+          "hasValue": true
+        },
+        "packageId": {
+          "hasValue": true
+        },
+        "packageVersion": {
+          "hasValue": true
+        },
+        "channel": {
+          "hasValue": true
+        },
+        "targets": {
+          "hasValue": true
+        },
+        "deploymentIds": {
+          "hasValue": true,
+          "description": "Retry exact deployment ids returned by standalone publish"
+        },
+        "releaseIds": {
+          "hasValue": true,
+          "description": "Legacy alias for deploymentIds"
+        },
+        "minPackageVersion": {
+          "hasValue": true
+        },
+        "maxPackageVersion": {
+          "hasValue": true
+        },
+        "packageVersionRange": {
+          "hasValue": true
+        },
+        "rollout": {
+          "hasValue": true
+        },
+        "dryRun": {
+          "default": false
+        },
+        "sourcemap": {
+          "hasValue": true
+        }
+      }
+    },
+    "registerPdiff": {
+      "description": "Upload and register a native-package patch for one exact build.",
+      "options": {
+        "deploymentId": {
+          "hasValue": true
+        },
+        "releaseId": {
+          "hasValue": true,
+          "description": "Legacy alias for deploymentId"
+        },
+        "nativeVersionId": {
+          "hasValue": true
+        },
+        "diffFromHash": {
+          "hasValue": true
+        },
+        "dryRun": {
+          "default": false
+        }
+      }
+    },
+    "versions": {
+      "options": {
+        "platform": {
+          "hasValue": true
+        }
+      }
+    },
+    "update": {
+      "options": {
+        "platform": {
+          "hasValue": true
+        },
+        "versionId": {
+          "hasValue": true
+        },
+        "packageId": {
+          "hasValue": true
+        },
+        "packageVersion": {
+          "hasValue": true
+        },
+        "channel": {
+          "hasValue": true
+        },
+        "minPackageVersion": {
+          "hasValue": true
+        },
+        "maxPackageVersion": {
+          "hasValue": true
+        },
+        "packageVersionRange": {
+          "hasValue": true
+        },
+        "rollout": {
+          "hasValue": true
+        },
+        "dryRun": {
+          "default": false
+        }
+      }
+    },
+    "updateVersionInfo": {
+      "options": {
+        "platform": {
+          "hasValue": true
+        },
+        "appId": {
+          "hasValue": true
+        },
+        "versionId": {
+          "hasValue": true
+        },
+        "name": {
+          "default": false,
+          "hasValue": true
+        },
+        "description": {
+          "default": false,
+          "hasValue": true
+        },
+        "metaInfo": {
+          "default": false,
+          "hasValue": true
+        }
+      }
+    },
+    "deleteVersion": {
+      "options": {
+        "platform": {
+          "hasValue": true
+        },
+        "versionId": {
+          "hasValue": true
+        },
+        "versionIds": {
+          "hasValue": true
+        },
+        "appId": {
+          "hasValue": true
+        }
+      }
+    },
+    "bundle": {
+      "description": "Bundle javascript code only and optionally publish.",
+      "options": {
+        "dev": {
+          "default": "false",
+          "hasValue": true
+        },
+        "platform": {
+          "hasValue": true
+        },
+        "bundleName": {
+          "default": "index.bundlejs",
+          "hasValue": true
+        },
+        "entryFile": {
+          "default": "index.js",
+          "hasValue": true
+        },
+        "intermediaDir": {
+          "default": "${tempDir}/intermedia/${platform}",
+          "hasValue": true
+        },
+        "output": {
+          "default": "${tempDir}/output/${platform}.${time}.ppk",
+          "hasValue": true
+        },
+        "sourcemap": {
+          "default": true
+        },
+        "taro": {
+          "default": false
+        },
+        "expo": {
+          "default": false
+        },
+        "rncli": {
+          "default": false
+        },
+        "hermes": {
+          "default": false
+        },
+        "hermesBase": {
+          "default": "auto",
+          "hasValue": true,
+          "description": "Hermes -base-bytecode: auto (previous version of this app, default) | none | path to .hbc/.ppk/.apk/.ipa"
+        },
+        "verifyHermesBase": {
+          "default": "true",
+          "hasValue": true,
+          "description": "After a base compile, check the bytecode is equivalent to a plain compile (disassembly compare); falls back on mismatch. Pass false to skip"
+        },
+        "cacheMaxMb": {
+          "hasValue": true,
+          "description": "Local bundle cache limit in MB (default 500)"
+        },
+        "resetCache": {
+          "default": "true",
+          "hasValue": true,
+          "description": "Pass --reset-cache to Metro (default true). false reuses Metro's transform cache, much faster for repeated bundles"
+        },
+        "name": {
+          "hasValue": true,
+          "description": "Version name for publishing"
+        },
+        "description": {
+          "hasValue": true,
+          "description": "Version description for publishing"
+        },
+        "metaInfo": {
+          "hasValue": true,
+          "description": "Meta information for publishing"
+        },
+        "packageId": {
+          "hasValue": true
+        },
+        "packageVersion": {
+          "hasValue": true
+        },
+        "minPackageVersion": {
+          "hasValue": true
+        },
+        "maxPackageVersion": {
+          "hasValue": true
+        },
+        "packageVersionRange": {
+          "hasValue": true
+        },
+        "rollout": {
+          "hasValue": true
+        },
+        "dryRun": {
+          "default": false
+        },
+        "sentry-release": {
+          "hasValue": true,
+          "description": "Sentry release for source map upload"
+        },
+        "sentryRelease": {
+          "hasValue": true,
+          "description": "Sentry release for source map upload"
+        },
+        "sentry-dist": {
+          "hasValue": true,
+          "description": "Sentry dist for source map upload"
+        },
+        "sentryDist": {
+          "hasValue": true,
+          "description": "Sentry dist for source map upload"
+        }
+      }
+    },
+    "hdiff": {
+      "description": "Create hdiff patch",
+      "options": {
+        "output": {
+          "default": "${tempDir}/output/hdiff",
+          "hasValue": true
+        },
+        "hbcTransform": {
+          "default": false
+        }
+      }
+    },
+    "hdiffFromApk": {
+      "description": "Create hdiff patch from a Android package(.apk)",
+      "options": {
+        "output": {
+          "default": "${tempDir}/output/hdiff-${time}.apk-patch",
+          "hasValue": true
+        }
+      }
+    },
+    "hdiffFromApp": {
+      "description": "Create hdiff patch from a Harmony package(.app)",
+      "options": {
+        "output": {
+          "default": "${tempDir}/output/hdiff-${time}.app-patch",
+          "hasValue": true
+        }
+      }
+    },
+    "hdiffFromIpa": {
+      "description": "Create hdiff patch from a iOS package(.ipa)",
+      "options": {
+        "output": {
+          "default": "${tempDir}/output/hdiff-${time}.ipa-patch",
+          "hasValue": true
+        }
+      }
+    },
+    "list": {
+      "description": "List all available commands",
+      "options": {}
+    },
+    "install": {
+      "description": "Install optional dependencies to the CLI",
+      "options": {}
+    },
+    "cache": {
+      "description": "Inspect or clean the local bundle cache: cache [clean]",
+      "options": {}
+    },
+    "symbolicate": {
+      "description": "Map a JS stack trace back to source using the source map archived with a published version.",
+      "options": {
+        "hash": {
+          "hasValue": true
+        },
+        "versionId": {
+          "hasValue": true
+        },
+        "platform": {
+          "hasValue": true
+        },
+        "output": {
+          "hasValue": true
+        }
+      }
+    }
+  },
+  "globalOptions": {
+    "no-interactive": {
+      "default": false
+    },
+    "acc": {
+      "default": false
+    },
+    "config": {
+      "hasValue": true
+    },
+    "appId": {
+      "hasValue": true
+    },
+    "appKey": {
+      "hasValue": true
+    },
+    "json": {
+      "default": false
+    }
+  }
+}

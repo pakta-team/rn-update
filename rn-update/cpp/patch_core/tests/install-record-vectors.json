@@ -1,0 +1,18 @@
+{"vectors":[
+  {"name":"zero-byte legacy","record":"","complete":true,"activation":true},
+  {"name":"empty object is not legacy","record":"{}","complete":false,"activation":false},
+  {"name":"whitespace is not legacy","record":" \n","complete":false,"activation":false},
+  {"name":"null is not legacy","record":"null","complete":false,"activation":false},
+  {"name":"array is not legacy","record":"[]","complete":false,"activation":false},
+  {"name":"valid schema 1","record":"{\"schema\":1,\"versionHash\":\"abc\",\"bundleSha256\":\"@SHA@\"}","complete":true,"activation":true},
+  {"name":"uppercase digest","record":"{\"schema\":1,\"versionHash\":\"abc\",\"bundleSha256\":\"@UPPER@\"}","complete":true,"activation":true},
+  {"name":"missing digest only deduplicates","record":"{\"schema\":1,\"versionHash\":\"abc\"}","complete":true,"activation":false},
+  {"name":"wrong digest type","record":"{\"schema\":1,\"versionHash\":\"abc\",\"bundleSha256\":123}","complete":true,"activation":false},
+  {"name":"wrong schema type","record":"{\"schema\":\"1\",\"versionHash\":\"abc\",\"bundleSha256\":\"@SHA@\"}","complete":false,"activation":false},
+  {"name":"future schema","record":"{\"schema\":2,\"versionHash\":\"abc\",\"bundleSha256\":\"@SHA@\"}","complete":false,"activation":false},
+  {"name":"wrong version","record":"{\"schema\":1,\"versionHash\":\"other\",\"bundleSha256\":\"@SHA@\"}","complete":false,"activation":false},
+  {"name":"tampered digest","record":"{\"schema\":1,\"versionHash\":\"abc\",\"bundleSha256\":\"0000000000000000000000000000000000000000000000000000000000000000\"}","complete":true,"activation":false},
+  {"name":"missing record","record":null,"complete":false,"activation":false},
+  {"name":"persisted current without record","record":null,"grandfathered":true,"complete":false,"activation":true},
+  {"name":"invalid record blocks grandfathering","record":"{}","grandfathered":true,"complete":false,"activation":false}
+]}

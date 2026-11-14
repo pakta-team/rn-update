@@ -1,0 +1,19 @@
+{"vectors":[
+  {"text":"{}","ok":true},
+  {"text":"{\"copies\":{\"a\":\"\",\"b\":null},\"deletes\":{\"gone/\":1}}","ok":true},
+  {"text":"{\"copies\":{\"a\":\"source\"},\"copiesCrc\":{\"a\":4294967295}}","ok":true},
+  {"text":"{\"copies\":{\"a\":\"source\",\"b\":\"source\"},\"copiesCrc\":{\"a\":1,\"b\":2}}","ok":false},
+  {"text":"{\"copiesCrc\":{\"a\":4294967296}}","ok":false},
+  {"text":"{\"copiesCrc\":{\"a\":-1}}","ok":false},
+  {"text":"{\"copiesCrc\":{\"a\":1.5}}","ok":false},
+  {"text":"{\"copies\":[]}","ok":false},
+  {"text":"{\"copies\":{\"a\":2}}","ok":false},
+  {"text":"{\"copies\":{\"../a\":\"b\"}}","ok":false},
+  {"text":"{\"copies\":{\"a/.pakta-complete\":\"b\"}}","ok":false},
+  {"text":"{\"deletes\":[\".pakta-complete\"]}","ok":false},
+  {"text":"{\"deletes\":[2]}","ok":false},
+  {"text":"{\"hbcTransform\":{\"index.bundlejs.patch\":false}}","ok":false},
+  {"text":"{\"hbcTransform\":{\"index.bundlejs.patch\":{\"version\":1}}}","ok":true},
+  {"text":"[]","ok":false},
+  {"text":"{","ok":false}
+]}

@@ -1,0 +1,73 @@
+name: Publish Package to npmjs
+on:
+  release:
+    types: [published]
+
+permissions:
+  id-token: write  # Required for OIDC
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest  # npm --provenance requires a GitHub-hosted runner
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      - name: Prepare publish version
+        env:
+          PUBLISH_VERSION: ${{ github.event.release.tag_name }}
+        run: bun scripts/prepublish.ts
+
+      - name: Verify package version matches release tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          EXPECTED_VERSION="${RELEASE_TAG#v}"
+          ACTUAL_VERSION="$(node -p "require('./package.json').version")"
+          echo "release tag: ${RELEASE_TAG} -> expected ${EXPECTED_VERSION}, package.json has ${ACTUAL_VERSION}"
+          test "${ACTUAL_VERSION}" = "${EXPECTED_VERSION}"
+
+      - name: Build package
+        run: bun run build
+
+      # Node 18 must only be on PATH for the verification below, not during
+      # the build: typescript >= 7 ships an extensionless ESM bin/tsc that
+      # Node 18.17 cannot load (ERR_UNKNOWN_FILE_EXTENSION).
+      - name: Set up Node.js 18 for runtime verification
+        uses: actions/setup-node@v7
+        with:
+          node-version: '18.17.0'
+
+      - name: Verify built CLI with Node.js 18
+        run: |
+          node --version
+          node lib/bin.js -v
+          # the programmatic entry points must also load on the minimum
+          # supported Node, not only the CLI banner
+          node -e "const m = require('./lib/exports.js'); if (!m) process.exit(1)"
+          node -e "const d = require('./lib/diff.js'); if (!d.diffCommands) process.exit(1)"
+
+      - name: Set up Node.js for npm publishing
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify publishable package contents
+        run: npm pack --dry-run --ignore-scripts
+
+      - name: Publish to npm
+        shell: bash
+        run: |
+          if [[ "${{ github.event.release.tag_name }}" == *"beta"* ]]; then
+            npm publish --ignore-scripts --provenance --access public --tag beta
+          else
+            npm publish --ignore-scripts --provenance --access public
+          fi

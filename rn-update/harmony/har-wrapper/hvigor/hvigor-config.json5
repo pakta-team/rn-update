@@ -1,0 +1,9 @@
+// [INPUT]: 依赖 Hvigor 模型版本和工具依赖解析约定
+// [OUTPUT]: 提供 har-wrapper Hvigor 配置入口
+// [POS]: 构建工具配置边界，不参与 HAR 运行时或 native 编译逻辑
+// [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+{
+  "modelVersion": "5.0.0",
+  "dependencies": {
+  }
+}

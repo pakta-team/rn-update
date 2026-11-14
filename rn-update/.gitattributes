@@ -1,0 +1,6 @@
+# [INPUT]: 依赖 Git checkout、WSL/Git Bash 与跨平台 shell 脚本的文本换行约定
+# [OUTPUT]: 为所有 Bash 脚本固定 LF，避免 CRLF 污染路径和参数
+# [POS]: 仓库级文本属性边界，不参与运行时代码与发布产物
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+# Bash 脚本必须保持 LF；CRLF 会把回车带入 WSL/Git Bash 的路径和参数。
+*.sh text eol=lf

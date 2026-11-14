@@ -1,0 +1,25 @@
+/**
+ * [INPUT]: 依赖 package.json 锁定的 TypeScript 4.9 与 Node 16 类型声明
+ * [OUTPUT]: 为 Firebase callable 测试夹具提供 CommonJS/ES2017 严格编译边界
+ * [POS]: functions 构建契约，隔离仓库根部 Bun 与新版 Node 类型，避免父级依赖泄漏
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "outDir": "lib",
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "es2017",
+    "types": [
+      "node"
+    ]
+  },
+  "compileOnSave": true,
+  "include": [
+    "src"
+  ]
+}

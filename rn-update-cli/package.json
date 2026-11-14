@@ -1,0 +1,121 @@
+{
+  "name": "rn-update-cli",
+  "version": "1.1.0",
+  "description": "React Native OTA update CLI for Android, iOS, Expo and HarmonyOS: bundle, publish, staged rollouts, CI/CD and sourcemaps.",
+  "main": "lib/exports.js",
+  "types": "lib/exports.d.ts",
+  "bin": {
+    "pakta": "lib/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/exports.d.ts",
+      "require": "./lib/exports.js",
+      "default": "./lib/exports.js"
+    },
+    "./diff": {
+      "types": "./lib/diff.d.ts",
+      "require": "./lib/diff.js",
+      "default": "./lib/diff.js"
+    },
+    "./lib/diff": {
+      "types": "./lib/diff.d.ts",
+      "require": "./lib/diff.js",
+      "default": "./lib/diff.js"
+    }
+  },
+  "files": [
+    "lib",
+    "proto",
+    "cli.json",
+    "LICENSE",
+    "readme-banner.svg",
+    "README.zh-CN.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.js",
+    "prepublishOnly": "bun run build",
+    "typecheck": "tsc --noEmit",
+    "typecheck:build": "tsc -p tsconfig.build.json",
+    "lint": "bun run typecheck && biome check .",
+    "lint:fix": "bun run typecheck && biome check --write .",
+    "test": "bun test --parallel=1",
+    "smoke": "node scripts/smoke-lib.js",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov",
+    "benchmark:diff-stream": "bun scripts/benchmark-diff-stream.ts",
+    "fuzz:hermes-base": "bun scripts/fuzz-hermes-base.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pakta-team/rn-update-cli.git"
+  },
+  "keywords": [
+    "react-native",
+    "react-native-update",
+    "ota",
+    "ota-update",
+    "over-the-air",
+    "hot-update",
+    "expo",
+    "android",
+    "ios",
+    "harmonyos",
+    "harmony",
+    "hermes",
+    "pakta",
+    "cli",
+    "ci-cd",
+    "sourcemap",
+    "deployment"
+  ],
+  "author": "Yoghourt Technology(BeiJing) Company Limited",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/pakta-team/rn-update-cli/issues"
+  },
+  "homepage": "https://github.com/pakta-team/rn-update-cli#readme",
+  "dependencies": {
+    "bplist-parser": "^0.3.2",
+    "chalk": "4",
+    "cli-arguments": "^0.2.1",
+    "compare-versions": "^6.1.1",
+    "filesize-parser": "^1.5.2",
+    "global-dirs": "^4.0.0",
+    "gradle-to-js": "^2.0.1",
+    "https-proxy-agent": "^7.0.6",
+    "i18next": "^26.4.0",
+    "plist": "^5.0.0",
+    "progress": "^2.0.3",
+    "protobufjs": "^8.7.2",
+    "read": "^4.1.0",
+    "registry-auth-token": "^5.1.1",
+    "source-map": "0.6.1",
+    "tty-table": "5.0",
+    "undici": "^6.28.0",
+    "yauzl": "^3.4.0",
+    "yazl": "3.3.1"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "0.8.13"
+  },
+  "engines": {
+    "node": ">= 18.17.0"
+  },
+  "devDependencies": {
+    "@babel/parser": "^8.0.4",
+    "@biomejs/biome": "^2.5.10",
+    "@types/bun": "^1.4.0",
+    "@types/filesize-parser": "^1.5.3",
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^26.3.0",
+    "@types/progress": "^2.0.7",
+    "@types/yauzl": "^3.4.0",
+    "@types/yazl": "^3.3.1",
+    "fs-extra": "^11.4.0",
+    "node-hdiffpatch": "^2.4.0",
+    "typescript": "^7.0.2"
+  },
+  "trustedDependencies": [
+    "@biomejs/biome"
+  ]
+}

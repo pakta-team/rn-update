@@ -1,0 +1,19 @@
+{
+  "translation_unit": "16f04c4a66a1eed03b05292390fc865d13a1dab19e7aa22bf04876c668dcb0e7",
+  "functions": {
+    "PaktaReadInstallRecord": "f46918f4fec7e4202f8a0cbdcad5bc2cb6c30ea7965fb1b58533361368709e64",
+    "PaktaVerifyInstallForActivation": "63c8e5acff687192a156489c0678ec1f8d97d2f92ce00d391f4b254caacfa6dc",
+    "PaktaWithStateLock": "628fd0f95a0a5edd86f76d0061c61a63d2dacfe2b8bf28d73f2e920e0d7660e9",
+    "PaktaClearVersionScopedState": "28a960fd1b80ba37a55704e93132c91ff2f7eb5a125bb50ad582e72c38c86345",
+    "PaktaRegisterDownload": "9aff1d7ebbd4ef1308b913757a7d1e01ff3142f2c7b14fa0e1d6030461105685"
+  },
+  "methods": {
+    "bundleURL": "016c37eebc9208a3aa17bcc0a2f08ee8f9848a937d9e0a41b72d4eb20df130d5",
+    "resolveLaunchBundleURL": "ae3f57f2b791d601cb0da1c86e64e6679469e0009c03a56fe5dfad8f8101b197",
+    "restorePurgedLaunch": "d6614fb70a97d6bd999731cb7b8e58217d77682da7f24e0a2739b427dc7b3a57",
+    "commitRoundWithGeneration": "b1cf6fe33064bd0991c30d742ff9ec179977bbd5da1e8ec22f5978ae2044edf7",
+    "runOnce": "c5bc8243ed06055f3e2b5913b3580233b5e28afc5f0bc6ed010247f1a591e894",
+    "runCheckRequest": "3ee017aeff52faa2a28c28843e66bbfad66359f1814bba43b673ab76d0c0bd87",
+    "performAttempts": "aff9b3ee434803d1b1c1bc973ccd3224c6b485a53a0876e87e7b8616166bb82b"
+  }
+}

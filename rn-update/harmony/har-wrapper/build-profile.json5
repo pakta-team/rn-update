@@ -1,0 +1,39 @@
+// [INPUT]: 依赖 DevEco SDK/产品模型与 ../pakta HAR 模块路径
+// [OUTPUT]: 提供 default 产品、debug/release 构建模式及 pakta target 映射
+// [POS]: har-wrapper 交付拓扑配置，决定包装应用如何消费 pakta，不定义更新协议
+// [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+{
+  "app": {
+    "signingConfigs": [],
+    "products": [
+      {
+        "name": "default",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "targetSdkVersion": "5.0.0(12)",
+        "runtimeOS": "HarmonyOS"
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "pakta",
+      "srcPath": "../pakta",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

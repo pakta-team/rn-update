@@ -1,0 +1,34 @@
+{
+  "description": "Pakta 本地纯核心契约；显式期望不经上游默认渠道适配。",
+  "cases": [
+    {"name":"旧配置缺渠道等价默认渠道","a":"{\"appKey\":\"k\"}","b":"{\"appKey\":\"k\",\"channel\":\"default\"}","equivalent":true},
+    {"name":"渠道变化取消旧缓存身份","a":"{\"appKey\":\"k\",\"channel\":\"store\"}","b":"{\"appKey\":\"k\",\"channel\":\"beta\"}","equivalent":false},
+    {"name":"服务端身份变化不等价","a":"{\"appKey\":\"k\",\"endpoints\":[\"https://a/api\"]}","b":"{\"appKey\":\"k\",\"endpoints\":[\"https://b/api\"]}","equivalent":false},
+    {"name":"null 渠道不是缺省","a":"{\"appKey\":\"k\",\"channel\":null}","b":"{\"appKey\":\"k\"}","equivalent":false}
+  ],
+  "local": [
+    {"name":"各等待阶段取消后不再发副作用命令","op":"cancelPhases","expected":true},
+    {"name":"固定宿主渠道胜过配置，opaque buildTime 不转数字","op":"prepare","config":"{\"appKey\":\"k\",\"channel\":\"injected\",\"endpoints\":[\"https://a/api\"]}","env":{"packageVersion":"1","channel":"store","currentVersion":null,"buildTime":"release:0007-not-a-time","uuid":"u"},"expected":{"packageVersion":"1","channel":"store","hash":null,"buildTime":"release:0007-not-a-time","cInfo":{"rnu":"","rn":"","uuid":"u"},"diffV":2}},
+    {"name":"本地配置归一化保留渠道","op":"normalize","config":"{\"appKey\":\"k\",\"channel\":\"beta\",\"endpoints\":[\"https://a/api/\"]}","expected":{"appKey":"k","channel":"beta","endpoints":["https://a/api"],"queryUrls":[],"afterDownload":"none","disabled":false,"rnu":"","rn":""}},
+    {"name":"空白渠道拒绝","op":"normalize","config":"{\"appKey\":\"k\",\"channel\":\"  \"}","expected":"Invalid native configuration: channel must be a string and must not be blank"},
+    {"name":"未知 bundleStatus 透传与缓存不丢失","op":"respond","config":"{\"appKey\":\"k\",\"channel\":\"store\"}","env":{},"response":"{\"upToDate\":true,\"bundleStatus\":\"unknownBundle\"}","request":"opaque-request","expected":{"action":"none","reason":"noUpdate","bundleStatus":"unknownBundle","cache":"{\"ts\":42,\"body\":\"{\\\"upToDate\\\":true,\\\"bundleStatus\\\":\\\"unknownBundle\\\"}\",\"request\":\"opaque-request\",\"config\":\"{\\\"appKey\\\":\\\"k\\\",\\\"channel\\\":\\\"store\\\"}\"}"}},
+    {"name":"总预算最多八个真实请求命令","op":"queryBudget","state":{"appKey":"k","httpsOnly":true,"list":"endpoints","next":0,"spent":0,"tried":[],"endpoints":["https://1","https://2","https://3","https://4","https://5","https://6","https://7","https://8","https://9"],"queryUrls":["https://list"]},"expected":8},
+    {"name":"损坏状态拒绝","op":"broken","state":"{","event":"{\"type\":\"http\"}","expected":[{"type":"finish","status":"failed","reason":"internal_error"}]}
+  ],
+  "query": [
+    {"name":"HTTPS 配置不访问明文发现地址","config":"{\"appKey\":\"k\",\"endpoints\":[\"https://a/api\"],\"queryUrls\":[\"http://injected/list\",\"https://safe/list\"]}","env":{},"sample":0,"responses":{},"expected":{"requests":["POST https://a/api/checkUpdate/k","GET https://safe/list"],"result":null}}
+  ],
+  "rounds": [
+    {"name":"HTTP 在途取消后迟到响应不提交","steps":[
+      {"event":{"type":"start","config":"{\"appKey\":\"k\",\"endpoints\":[\"https://a/api\"]}","now":0},"commands":[{"type":"markIncomplete"},{"type":"collectEnv"}]},
+      {"event":{"type":"env","env":{"packageVersion":"1","channel":"store","buildTime":"opaque"},"now":1},"commands":[{"type":"http","url":"https://a/api/checkUpdate/k","post":true,"body":"{\"packageVersion\":\"1\",\"channel\":\"store\",\"buildTime\":\"opaque\",\"cInfo\":{\"rnu\":\"\",\"rn\":\"\",\"uuid\":\"\"},\"diffV\":2}","timeoutMs":10000,"callTimeoutMs":15000}]},
+      {"event":{"type":"cancel","reason":"config_changed","now":2},"commands":[{"type":"finish","status":"cancelled","reason":"config_changed"}]},
+      {"event":{"type":"http","text":"{\"upToDate\":true}","now":3},"commands":[]}
+    ]},
+    {"name":"reset 取消发生在采集环境之前","steps":[
+      {"event":{"type":"start","config":"{\"appKey\":\"k\"}","now":0},"commands":[{"type":"markIncomplete"},{"type":"collectEnv"}]},
+      {"event":{"type":"cancel","now":1},"commands":[{"type":"finish","status":"cancelled","reason":"reset"}]},
+      {"event":{"type":"env","env":{},"now":2},"commands":[]}
+    ]}
+  ]
+}

@@ -1,0 +1,569 @@
+syntax = "proto3";
+
+package aapt.pb;
+
+option java_package = "com.android.aapt";
+
+import "Configuration.proto";
+
+// A string pool that wraps the binary form of the C++ class android::ResStringPool.
+message StringPool {
+  bytes data = 1;
+}
+
+// The position of a declared entity in a file.
+message SourcePosition {
+  uint32 line_number = 1;
+  uint32 column_number = 2;
+}
+
+// Developer friendly source file information for an entity in the resource table.
+message Source {
+  // The index of the string path within the source StringPool.
+  uint32 path_idx = 1;
+
+  SourcePosition position = 2;
+}
+
+// Top level message representing a resource table.
+message ResourceTable {
+  // The string pool containing source paths referenced by Source messages.
+  StringPool source_pool = 1;
+
+  // The packages declared in this resource table.
+  repeated Package package = 2;
+
+  // The overlayable declarations in this resource table.
+  repeated Overlayable overlayable = 3;
+
+  // The tool fingerprints of the tools that built this resource table.
+  repeated ToolFingerprint tool_fingerprint = 4;
+}
+
+// A package declaration.
+message Package {
+  // The package ID of this package.
+  // This is the first byte of a resource ID (0xPPTTEEEE).
+  // This is optional, and if not set, the package ID is assigned by the runtime.
+  // For the framework, this is 0x01. For the application, this is 0x7f.
+  uint32 package_id = 1;
+
+  // The Java compatible package name.
+  string package_name = 2;
+
+  // The types declared in this package.
+  repeated Type type = 3;
+}
+
+// A set of resources grouped under a common type (string, layout, xml, etc).
+// This maps to the second byte of a resource ID (0xPPTTEEEE).
+message Type {
+  // The type ID of this type.
+  // This is optional, and if not set, the type ID is assigned by the runtime.
+  uint32 type_id = 1;
+
+  // The name of this type.
+  string name = 2;
+
+  // The entries declared in this type.
+  repeated Entry entry = 3;
+}
+
+// A resource entry declaration.
+// This maps to the last two bytes of a resource ID (0xPPTTEEEE).
+message Entry {
+  // The entry ID of this entry.
+  // This is optional, and if not set, the entry ID is assigned by the runtime.
+  uint32 entry_id = 1;
+
+  // The name of this entry.
+  string name = 2;
+
+  // The visibility of this entry.
+  Visibility visibility = 3;
+
+  // The allow-new state of this entry.
+  AllowNew allow_new = 4;
+
+  // The overlayable state of this entry.
+  OverlayableItem overlayable_item = 5;
+
+  // The set of values defined for this entry, each with a different configuration.
+  repeated ConfigValue config_value = 6;
+}
+
+// The visibility of a resource entry.
+message Visibility {
+  enum Level {
+    UNKNOWN = 0;
+    PRIVATE = 1;
+    PUBLIC = 2;
+  }
+
+  // The visibility level.
+  Level level = 1;
+
+  // The source of the visibility declaration.
+  Source source = 2;
+
+  // The comment associated with the visibility declaration.
+  string comment = 3;
+}
+
+// The allow-new state of a resource entry.
+message AllowNew {
+  // The source of the allow-new declaration.
+  Source source = 1;
+
+  // The comment associated with the allow-new declaration.
+  string comment = 2;
+}
+
+// The overlayable state of a resource entry.
+message OverlayableItem {
+  enum Policy {
+    NONE = 0;
+    PUBLIC = 1;
+    SYSTEM = 2;
+    VENDOR = 3;
+    PRODUCT = 4;
+    SIGNATURE = 5;
+    ODM = 6;
+    OEM = 7;
+    ACTOR = 8;
+    CONFIG_SIGNATURE = 9;
+  }
+
+  // The source of the overlayable declaration.
+  Source source = 1;
+
+  // The comment associated with the overlayable declaration.
+  string comment = 2;
+
+  // The policy of the overlayable declaration.
+  repeated Policy policy = 3;
+
+  // The index of the overlayable declaration in the overlayable list.
+  uint32 overlayable_idx = 4;
+}
+
+// A value defined for a resource entry with a specific configuration.
+message ConfigValue {
+  // The configuration for which this value is defined.
+  Configuration config = 1;
+
+  // The value of the resource.
+  Value value = 2;
+}
+
+// A generic value of a resource.
+message Value {
+  // The source of the value declaration.
+  Source source = 1;
+
+  // The comment associated with the value declaration.
+  string comment = 2;
+
+  // The value is a weak reference to another resource.
+  bool weak = 3;
+
+  // The value is a raw string.
+  Item item = 4;
+
+  // The value is a compound value.
+  CompoundValue compound_value = 5;
+}
+
+// A value that is a single item.
+message Item {
+  // The value is a reference to another resource.
+  Reference ref = 1;
+
+  // The value is a string.
+  String str = 2;
+
+  // The value is a raw string.
+  RawString raw_str = 3;
+
+  // The value is a styled string.
+  StyledString styled_str = 4;
+
+  // The value is a file.
+  File file = 5;
+
+  // The value is an integer.
+  Id id = 6;
+
+  // The value is a primitive.
+  Primitive prim = 7;
+}
+
+// A value that is a compound value.
+message CompoundValue {
+  // The value is an attribute.
+  Attribute attr = 1;
+
+  // The value is a style.
+  Style style = 2;
+
+  // The value is a styleable.
+  Styleable styleable = 3;
+
+  // The value is an array.
+  Array array = 4;
+
+  // The value is a plural.
+  Plural plural = 5;
+
+  // The value is a macro.
+  MacroBody macro = 6;
+}
+
+// A reference to another resource.
+message Reference {
+  enum Type {
+    REFERENCE = 0;
+    ATTRIBUTE = 1;
+  }
+
+  // The type of reference.
+  Type type = 1;
+
+  // The resource ID being referenced.
+  uint32 id = 2;
+
+  // The name of the resource being referenced.
+  string name = 3;
+
+  // The private state of the reference.
+  bool private = 4;
+
+  // The dynamic reference state of the reference.
+  bool is_dynamic = 5;
+}
+
+// A string value.
+message String {
+  // The string value.
+  string value = 1;
+}
+
+// A raw string value.
+message RawString {
+  // The raw string value.
+  string value = 1;
+}
+
+// A styled string value.
+message StyledString {
+  // The raw string value.
+  string value = 1;
+
+  // The spans of the styled string.
+  repeated Span span = 2;
+}
+
+// A span of a styled string.
+message Span {
+  // The tag of the span.
+  string tag = 1;
+
+  // The first character index of the span.
+  uint32 first_char = 2;
+
+  // The last character index of the span.
+  uint32 last_char = 3;
+}
+
+// A file value.
+message File {
+  // The path to the file.
+  string path = 1;
+}
+
+// An ID value.
+message Id {
+}
+
+// A primitive value.
+message Primitive {
+  // The null value.
+  message NullType {}
+  // The empty value.
+  message EmptyType {}
+
+  oneof oneof_value {
+    NullType null_value = 1;
+    EmptyType empty_value = 2;
+    float float_value = 3;
+    uint32 dimension_value = 4;
+    uint32 fraction_value = 5;
+    int32 int_decimal_value = 6;
+    uint32 int_hexadecimal_value = 7;
+    bool boolean_value = 8;
+    uint32 color_argb8_value = 9;
+    uint32 color_rgb8_value = 10;
+    uint32 color_argb4_value = 11;
+    uint32 color_rgb4_value = 12;
+  }
+}
+
+// An attribute value.
+message Attribute {
+  enum FormatFlags {
+    NONE = 0x0;
+    REFERENCE = 0x1;
+    STRING = 0x2;
+    INTEGER = 0x4;
+    BOOLEAN = 0x8;
+    COLOR = 0x10;
+    FLOAT = 0x20;
+    DIMENSION = 0x40;
+    FRACTION = 0x80;
+    ENUM = 0x10000;
+    FLAGS = 0x20000;
+  }
+
+  // The format flags of the attribute.
+  uint32 format_flags = 1;
+
+  // The minimum value of the attribute.
+  int32 min_int = 2;
+
+  // The maximum value of the attribute.
+  int32 max_int = 3;
+
+  // The symbols of the attribute.
+  repeated Symbol symbol = 4;
+}
+
+// A symbol of an attribute.
+message Symbol {
+  // The source of the symbol declaration.
+  Source source = 1;
+
+  // The comment associated with the symbol declaration.
+  string comment = 2;
+
+  // The name of the symbol.
+  Reference name = 3;
+
+  // The value of the symbol.
+  uint32 value = 4;
+
+  // The type of the symbol.
+  uint32 type = 5;
+}
+
+// A style value.
+message Style {
+  // The parent of the style.
+  Reference parent = 1;
+
+  // The source of the parent declaration.
+  Source parent_source = 2;
+
+  // The entries of the style.
+  repeated Entry entry = 3;
+
+  // An entry of a style.
+  message Entry {
+    // The source of the entry declaration.
+    Source source = 1;
+
+    // The comment associated with the entry declaration.
+    string comment = 2;
+
+    // The key of the entry.
+    Reference key = 3;
+
+    // The item of the entry.
+    Item item = 4;
+  }
+}
+
+// A styleable value.
+message Styleable {
+  // The entries of the styleable.
+  repeated Entry entry = 1;
+
+  // An entry of a styleable.
+  message Entry {
+    // The source of the entry declaration.
+    Source source = 1;
+
+    // The comment associated with the entry declaration.
+    string comment = 2;
+
+    // The attribute of the entry.
+    Reference attr = 3;
+  }
+}
+
+// An array value.
+message Array {
+  // The elements of the array.
+  repeated Element element = 1;
+
+  // An element of an array.
+  message Element {
+    // The source of the element declaration.
+    Source source = 1;
+
+    // The comment associated with the element declaration.
+    string comment = 2;
+
+    // The item of the element.
+    Item item = 3;
+  }
+}
+
+// A plural value.
+message Plural {
+  enum Arity {
+    ZERO = 0;
+    ONE = 1;
+    TWO = 2;
+    FEW = 3;
+    MANY = 4;
+    OTHER = 5;
+  }
+
+  // The entries of the plural.
+  repeated Entry entry = 1;
+
+  // An entry of a plural.
+  message Entry {
+    // The source of the entry declaration.
+    Source source = 1;
+
+    // The comment associated with the entry declaration.
+    string comment = 2;
+
+    // The arity of the entry.
+    Arity arity = 3;
+
+    // The item of the entry.
+    Item item = 4;
+  }
+}
+
+// A macro body value.
+message MacroBody {
+  // The raw string value.
+  string raw_string = 1;
+
+  // The style string value.
+  StyleString style_string = 2;
+
+  // The untranslatable sections of the macro.
+  repeated UntranslatableSection untranslatable_section = 3;
+
+  // The namespace declarations of the macro.
+  repeated NamespaceDeclaration namespace_declaration = 4;
+}
+
+message StyleString {
+  string str = 1;
+  repeated Span spans = 2;
+}
+
+message UntranslatableSection {
+  uint64 start_index = 1;
+  uint64 end_index = 2;
+}
+
+message NamespaceDeclaration {
+  string prefix = 1;
+  string uri = 2;
+  Source source = 3;
+}
+
+// An overlayable declaration.
+message Overlayable {
+  // The name of the overlayable.
+  string name = 1;
+
+  // The source of the overlayable declaration.
+  Source source = 2;
+
+  // The actor of the overlayable declaration.
+  string actor = 3;
+}
+
+// A tool fingerprint.
+message ToolFingerprint {
+  // The tool name.
+  string tool = 1;
+
+  // The version of the tool.
+  string version = 2;
+}
+
+// A dynamic reference table.
+message DynamicRefTable {
+  // The package ID to package name mapping.
+  repeated PackageId packageName = 1;
+}
+
+message PackageId {
+  uint32 id = 1;
+  string name = 2;
+}
+
+// A generic XML node.
+message XmlNode {
+  // The element node.
+  XmlElement element = 1;
+
+  // The text node.
+  string text = 2;
+
+  // The source of the node.
+  SourcePosition source = 3;
+}
+
+message XmlNamespace {
+  string prefix = 1;
+  string uri = 2;
+  SourcePosition source = 3;
+}
+
+// An XML element.
+message XmlElement {
+  // The namespace declarations of the element.
+  repeated XmlNamespace namespace_declaration = 1;
+
+  // The namespace URI of the element.
+  string namespace_uri = 2;
+
+  // The name of the element.
+  string name = 3;
+
+  // The attributes of the element.
+  repeated XmlAttribute attribute = 4;
+
+  // The children of the element.
+  repeated XmlNode child = 5;
+}
+
+// An XML attribute.
+message XmlAttribute {
+  // The namespace URI of the attribute.
+  string namespace_uri = 1;
+
+  // The name of the attribute.
+  string name = 2;
+
+  // The value of the attribute.
+  string value = 3;
+
+  // The source of the attribute.
+  SourcePosition source = 4;
+
+  // The resource ID of the attribute.
+  uint32 resource_id = 5;
+
+  // The compiled item of the attribute.
+  Item compiled_item = 6;
+}

@@ -1,0 +1,38 @@
+# [INPUT]: 依赖缓存目录、工具链 scope、调用方写入请求及 GitHub 事件/分支身份
+# [OUTPUT]: 恢复内容寻址缓存，仅受信主分支的 iOS core job 可保存每日快照
+# [POS]: iOS CI 的内容缓存策略；已编译 app 继续使用精确原生输入 key
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+name: Bounded content-addressed E2E cache
+description: Restore shared content caches with trusted daily snapshots.
+inputs:
+  path:
+    description: Content-addressed cache directory, never a built app.
+    required: true
+  scope:
+    description: Cache schema and toolchain identity.
+    required: true
+  write:
+    description: Only the core matrix leg requests trusted snapshot writes.
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - id: epoch
+      shell: bash
+      run: echo "day=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+    - name: Restore read-only snapshot
+      if: "!(inputs.write == 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && github.job == 'e2e-ios')"
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}
+        key: e2e-content-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.scope }}-${{ steps.epoch.outputs.day }}
+        restore-keys: |
+          e2e-content-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.scope }}-
+    - name: Restore and save trusted daily snapshot
+      if: inputs.write == 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && github.job == 'e2e-ios'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}
+        key: e2e-content-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.scope }}-${{ steps.epoch.outputs.day }}
+        restore-keys: |
+          e2e-content-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.scope }}-

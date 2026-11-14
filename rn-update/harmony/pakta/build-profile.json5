@@ -1,0 +1,23 @@
+// [INPUT]: 依赖 DevEco Stage 模式、CMakeLists.txt 和 native 目标配置
+// [OUTPUT]: 提供 pakta HAR 的 arm64-v8a/x86_64 externalNativeOptions 与 default/ohosTest targets
+// [POS]: pakta 模块构建拓扑边界，把 ArkTS 源与 rnupdate NAPI 共享库接到同一产物
+// [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    "externalNativeOptions": {
+      "path": "./src/main/cpp/CMakeLists.txt",
+      "abiFilters": ["arm64-v8a", "x86_64"],
+      "arguments": "",
+      "cppFlags": ""
+    }
+  },
+  "targets": [
+    {
+      "name": "default",
+    },
+    {
+      "name": "ohosTest",
+    }
+  ]
+}

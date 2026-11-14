@@ -1,0 +1,6 @@
+[submodule "rn-update/android/jni/lzma"]
+	path = rn-update/android/jni/lzma
+	url = https://github.com/sisong/lzma.git
+[submodule "rn-update/android/jni/HDiffPatch"]
+	path = rn-update/android/jni/HDiffPatch
+	url = https://github.com/sisong/HDiffPatch.git

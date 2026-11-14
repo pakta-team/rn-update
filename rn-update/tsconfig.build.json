@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": false,
+    "noEmitOnError": true,
+    "allowJs": false,
+    "rootDir": "./src",
+    "outDir": "./dist/types",
+    "types": ["react", "react-native"],
+    "removeComments": true,
+    "incremental": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/__tests__", "node_modules", "dist", "harmony", "Example"]
+}

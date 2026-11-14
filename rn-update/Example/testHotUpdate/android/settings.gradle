@@ -1,0 +1,10 @@
+// [INPUT]: React Native Gradle settings plugin 与 app 模块。
+// [OUTPUT]: 定义 AwesomeProject 根工程并启用 RN 自动链接设置。
+// [POS]: Android 构建拓扑入口，供 Gradle wrapper 和 CI 解析模块关系。
+// [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+plugins { id("com.facebook.react.settings") }
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+rootProject.name = 'AwesomeProject'
+include ':app'
+includeBuild('../node_modules/@react-native/gradle-plugin')

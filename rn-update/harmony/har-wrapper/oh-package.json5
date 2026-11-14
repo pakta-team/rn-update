@@ -1,0 +1,8 @@
+// [INPUT]: 依赖 OpenHarmony oh-package 模型和包装工程依赖声明
+// [OUTPUT]: 提供 har-wrapper 包模型版本及依赖清单
+// [POS]: 应用包装依赖配置，不承载 pakta 运行时 API
+// [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+{
+  modelVersion: '5.0.0',
+  dependencies: {},
+}

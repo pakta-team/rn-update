@@ -1,0 +1,13 @@
+{
+ "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["ExpoPaktaModule"],
+    "reactDelegateHandlers": ["ExpoPaktaReactDelegateHandler"],
+    "podspecPath":"rn-update.podspec"
+  },
+  "android": {
+    "modules": [
+      "expo.modules.pakta.ExpoPaktaModule"
+    ]
+  }
+}

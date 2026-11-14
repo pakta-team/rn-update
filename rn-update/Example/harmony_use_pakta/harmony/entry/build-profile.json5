@@ -1,0 +1,40 @@
+/**
+ * [INPUT]: 依赖 Hvigor stageMode 构建模型、CMake 外部原生选项与签名配置
+ * [OUTPUT]: 提供 entry HAP 的构建变体、原生编译和打包参数
+ * [POS]: entry 模块交付配置，决定 ArkTS/C++ 产物如何进入测试或发布包
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    "externalNativeOptions": {
+      "path": "./src/main/cpp/CMakeLists.txt",
+      "abiFilters": ["arm64-v8a", "x86_64"],
+      "arguments": "",
+      "cppFlags": "",
+    },
+  },
+  "buildOptionSet": [
+    {
+      "name": "release",
+      "arkOptions": {
+        "obfuscation": {
+          "ruleOptions": {
+            "enable": false,
+            "files": [
+              "./obfuscation-rules.txt"
+            ]
+          }
+        }
+      }
+    },
+  ],
+  "targets": [
+    {
+      "name": "default"
+    },
+    {
+      "name": "ohosTest",
+    }
+  ]
+}

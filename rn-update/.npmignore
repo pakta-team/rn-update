@@ -1,0 +1,98 @@
+# [INPUT]: 依赖 npm 打包入口与客户端仓库内的样例、CI、原生构建文件
+# [OUTPUT]: 定义发布到 npm 的排除边界，保留 SDK 运行时与必要声明
+# [POS]: rn-update 发布卫生配置，与 package.json files/入口共同生效
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+.babelrc
+.npmignore
+.eslintrc
+.nvmrc
+.travis.yml
+Example
+android/build
+.vscode
+.github/
+
+# OSX
+#
+.DS_Store
+
+# Xcode
+#
+build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata
+*.xccheckout
+*.moved-aside
+DerivedData
+*.hmap
+*.ipa
+*.xcuserstate
+project.xcworkspace
+
+# Android/IJ
+#
+.idea
+.gradle
+local.properties
+android/build
+android/obj
+.project
+
+# node.js
+#
+node_modules/
+npm-debug.log
+Example
+yarn.lock
+bun.lock
+*.test.ts
+*.test.js
+src/__tests__/
+
+# Native build caches / intermediates (must not ship to consumers)
+android/.cxx/
+android/.gradle/
+**/*.o
+CODE_AUDIT.md
+
+domains.json
+endpoints.json
+
+tea.yaml
+
+e2e/
+
+harmony/**
+!harmony/pakta.har
+!harmony/pakta/src/**
+!harmony/hvigor-plugin.ts
+
+.tmp
+.cursor
+.e2e-rn077-oldarch
+.claude
+.bun-cache
+.ohpm-cache
+
+android/jni/lzma/bin
+android/jni/lzma/DOC
+
+# Ignore unnecessary development files
+scripts/**
+harmony/pakta/src/test/
+babel.config.js
+tsconfig.json
+bunfig.toml
+
+# Ignore temporary files created by npm pack during CI builds
+*.tgz
+package
+
+

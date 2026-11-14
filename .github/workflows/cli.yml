@@ -1,0 +1,207 @@
+# [INPUT]: 依赖 CLI 依赖锁、命令/上传/Hermes 回归及固定编译器夹具
+# [OUTPUT]: 提供 CLI 静态检查、单测、Node18 smoke 与真实 Hermes 矩阵结果
+# [POS]: 独立 CLI 的 monorepo 验证入口，与 SDK 发布流程解耦
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+name: cli
+
+on:
+  pull_request:
+    paths:
+      - 'rn-update-cli/**'
+      - '.github/workflows/cli.yml'
+  push:
+    branches:
+      - master
+      - main
+      - 'codex/verify-*'
+    paths:
+      - 'rn-update-cli/**'
+      - '.github/workflows/cli.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+    working-directory: rn-update-cli
+
+jobs:
+  lint:
+    name: CLI lint and typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Run lint and typecheck
+        run: bun run lint
+
+  test:
+    name: CLI unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Run unit tests
+        run: bun run test
+
+  node18-smoke:
+    name: CLI build and Node 18.17 smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Build package
+        run: bun run build
+      - name: Set up the oldest supported Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '18.17.0'
+      - name: Load built modules and exercise offline commands and proxy uploads
+        run: |
+          node -e 'if (process.version !== "v18.17.0") throw new Error("unexpected Node version");'
+          node scripts/smoke-lib.js
+      - name: Check cancellation and late asynchronous errors on Node 18
+        run: |
+          output=$(timeout 30s node tests/fixtures/hermes-async-check.cjs '{"operation":"abort","modulePath":"./lib/utils/hermes-base.js"}')
+          printf '%s\n' "$output"
+          [[ "$output" == *HERMES_ASYNC_RESULT* ]]
+          [[ "$output" == *'"status":"dump-failed"'* ]]
+      - name: Check timeout, abort and debug-output cleanup on Node 18
+        env:
+          HERMES_TEST_NODE: node
+        run: bun test tests/hermes-blockers.test.ts
+
+  hermes-integration:
+    name: CLI Hermes HBC ${{ matrix.hbc }}${{ matrix.suffix }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - hbc: 96
+            suffix: ''
+            package: react-native@0.77.3
+            directory: react-native
+            executable: sdks/hermesc/linux64-bin/hermesc
+          - hbc: 98
+            suffix: ''
+            package: hermes-compiler@250829098.0.16
+            directory: hermes-compiler
+            executable: hermesc/linux64-bin/hermesc
+          - hbc: 98
+            suffix: '-patch17'
+            package: hermes-compiler@250829098.0.17
+            directory: hermes-compiler
+            executable: hermesc/linux64-bin/hermesc
+          - hbc: 99
+            suffix: ''
+            package: hermes-compiler@260318099.0.4
+            directory: hermes-compiler
+            executable: hermesc/linux64-bin/hermesc
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Cache the exact compiler package
+        id: compiler-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/hermes-tests/${{ matrix.directory }}
+          key: cli-hermesc-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.package }}
+      - name: Install and verify the pinned real compiler
+        env:
+          COMPILER_PACKAGE: ${{ matrix.package }}
+          COMPILER_DIRECTORY: ${{ matrix.directory }}
+          COMPILER_EXECUTABLE: ${{ matrix.executable }}
+          EXPECTED_HBC: ${{ matrix.hbc }}
+          COMPILER_CACHE_HIT: ${{ steps.compiler-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/hermes-tests/$COMPILER_DIRECTORY"
+          if [ "$COMPILER_CACHE_HIT" != true ]; then
+            mkdir -p "$root"
+            archive=$(npm pack "$COMPILER_PACKAGE" --pack-destination "$RUNNER_TEMP" --silent)
+            tar -xzf "$RUNNER_TEMP/$archive" --strip-components=1 -C "$root" \
+              "package/$COMPILER_EXECUTABLE" package/package.json
+          fi
+          node -e 'const p = require(process.argv[1]); if (`${p.name}@${p.version}` !== process.env.COMPILER_PACKAGE) throw new Error("unexpected compiler package");' "$root/package.json"
+          export HERMESC="$root/$COMPILER_EXECUTABLE"
+          test -x "$HERMESC"
+          "$HERMESC" -version
+          bun -e 'import {probeHbcVersion} from "./src/utils/hermes-base"; if (probeHbcVersion(process.env.HERMESC) !== Number(process.env.EXPECTED_HBC)) throw new Error("unexpected HBC version");'
+          printf 'HERMESC=%s\n' "$HERMESC" >> "$GITHUB_ENV"
+      - name: Cache pinned Metro fixtures
+        id: metro-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/hermes-metro-fixtures
+          key: cli-metro-fixtures-v1-${{ runner.os }}-e6a870a1c26c4b64c7860d7e1aa575707d22ad88
+      - name: Fetch and verify pinned real Metro fixtures
+        env:
+          METRO_CACHE_HIT: ${{ steps.metro-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/hermes-metro-fixtures"
+          mkdir -p "$root"
+          base="https://raw.githubusercontent.com/sunnylqm/hbc-diff-benchmark/e6a870a1c26c4b64c7860d7e1aa575707d22ad88"
+          if [ "$METRO_CACHE_HIT" != true ]; then
+            for file in base.jsbundle s3-medium-feature.jsbundle; do
+              curl --fail --location --retry 2 --max-time 60 "$base/fixtures/$file" -o "$root/$file"
+            done
+            curl --fail --location --retry 2 --max-time 60 "$base/LICENSE" -o "$root/LICENSE"
+          fi
+          test -s "$root/LICENSE"
+          printf '11c8ad8f7e8c7c59ee45582c77d896a35fa646617f3ba0f5b338a425a7c93b7d  %s/base.jsbundle\n' "$root" | sha256sum --check
+          printf 'a693e68254b6c13fae8f839d20c14f9d11c5ab98d4be1b8d13ba1e929a12d752  %s/s3-medium-feature.jsbundle\n' "$root" | sha256sum --check
+          printf 'HERMES_METRO_FIXTURES=%s\n' "$root" >> "$GITHUB_ENV"
+      - name: Run real compiler and fallback regressions
+        run: bun test tests/hermes-*.test.ts
+      - name: Run seeded differential fuzzing
+        env:
+          FUZZ_SEED: ${{ matrix.hbc }}
+        run: bun run fuzz:hermes-base --rounds 50 --seed "$FUZZ_SEED" --out "$RUNNER_TEMP/hermes-fuzz"
+      - name: Preserve failing fuzz cases
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-hermes-fuzz-hbc-${{ matrix.hbc }}${{ matrix.suffix }}
+          path: ${{ runner.temp }}/hermes-fuzz
+          retention-days: 7
+          if-no-files-found: ignore

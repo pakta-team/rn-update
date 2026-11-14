@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Android binary XML chunk、节点/属性编码与 Buffer 读取规则
- * [OUTPUT]: 对外提供 BinaryXmlParser，解析 AndroidManifest 二进制 XML
+ * [OUTPUT]: 对外提供 parseBinaryXml 与 XmlElement，将 AndroidManifest 二进制 XML 转成类型化节点树
  * [POS]: Android manifest 解析底座，只产出结构化节点，不决定应用业务字段
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */

@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 Node Buffer、文件内有界小端 Reader 与 Android resources.arsc 二进制资源表格式，无 bytebuffer 运行时依赖
  * [OUTPUT]: 对外提供 ResourceFinder，按资源标识解析包内字符串和图标引用
- * [POS]: Android 资源解析底座，被 ApkParser/AabParser 消费，不负责 ZIP 生命周期
+ * [POS]: Android 资源解析底座，由 parseApkManifest 解析资源引用时消费，不负责 ZIP 生命周期
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 

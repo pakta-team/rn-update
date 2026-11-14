@@ -19,10 +19,16 @@ parser.add_argument('--project-root', type=Path, required=True)
 parser.add_argument('--evidence-dir', type=Path, required=True)
 parser.add_argument('--sdk-tarball', type=Path, required=True)
 parser.add_argument('--sdk-sha256', required=True)
+parser.add_argument('--verify-only', action='store_true', help='只验证候选与安装树，不访问设备')
 parser.add_argument('--adb', default='adb')
 parser.add_argument('--serial', required=True)
 parser.add_argument('--package', default='space.yoghourt.pakta.expoprobe')
 args = parser.parse_args()
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
 ROOT = args.evidence_dir.resolve()
 ROOT.mkdir(parents=True, exist_ok=True)
 HOST = args.project_root.resolve()
@@ -33,21 +39,23 @@ if not re.fullmatch(r'[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+', PACKAGE):
 if 'probe' not in PACKAGE and 'e2e' not in PACKAGE:
     parser.error('package must explicitly identify a probe/e2e test application')
 candidate = args.sdk_tarball.resolve()
-assert hashlib.sha256(candidate.read_bytes()).hexdigest() == args.sdk_sha256.lower(), 'candidate SHA-256 differs'
+require(hashlib.sha256(candidate.read_bytes()).hexdigest() == args.sdk_sha256.lower(), 'candidate SHA-256 differs')
 sdk = HOST/'node_modules/rn-update'
-assert not sdk.is_symlink() and not (hasattr(sdk, 'is_junction') and sdk.is_junction()), 'SDK must be a physical install'
+require(not sdk.is_symlink() and not (hasattr(sdk, 'is_junction') and sdk.is_junction()), 'SDK must be a physical install')
 count = 0
 with tarfile.open(candidate) as archive:
     for member in archive.getmembers():
         if not member.isfile():
             continue
-        assert member.name.startswith('package/')
+        require(member.name.startswith('package/'), 'candidate member outside package/')
         relative = Path(member.name.removeprefix('package/'))
-        assert not relative.is_absolute() and '..' not in relative.parts
-        assert (sdk/relative).read_bytes() == archive.extractfile(member).read(), f'installed candidate differs: {relative}'
+        require(not relative.is_absolute() and '..' not in relative.parts, 'candidate member escapes SDK')
+        require((sdk/relative).read_bytes() == archive.extractfile(member).read(), f'installed candidate differs: {relative}')
         count += 1
-assert count > 0
+require(count > 0, 'candidate has no files')
 (ROOT/'expo-candidate-guard.json').write_text(json.dumps({'candidate':str(candidate),'sha256':args.sdk_sha256,'files':count,'differences':[]},indent=2),encoding='utf8')
+if args.verify_only:
+    raise SystemExit(0)
 APK = HOST / 'android/app/build/outputs/apk/release/app-release.apk'
 BASE = [ADB, '-s', args.serial]
 frames = []
@@ -89,14 +97,14 @@ def launch():
     adb('shell', 'am', 'start', '-W', '-n', f'{PACKAGE}/.MainActivity')
 
 def base(mode):
-    assert adb('shell', 'pm', 'clear', PACKAGE) == 'Success'
+    require(adb('shell', 'pm', 'clear', PACKAGE) == 'Success', 'could not clear test application')
     launch()
     wait_for(f'{mode}-base', 'bundleLabel: BINARY_BASE', 'currentHash: (empty)')
 
 stages = [('E2E_FULL_V1','e2e-full-v1'), ('E2E_PPK_PATCH_V2','e2e-ppk-patch-v2'),
           ('E2E_PACKAGE_PATCH_V3','e2e-package-patch-v3'), ('E2E_V2TRACK_V4','e2e-v2track-v4')]
-assert json.loads((HOST/'.e2e-artifacts/android/manifest.json').read_text())['fullFallback'] is False
-assert 'Success' in adb('install', '-r', str(APK))
+require(json.loads((HOST/'.e2e-artifacts/android/manifest.json').read_text())['fullFallback'] is False, 'real patches required')
+require('Success' in adb('install', '-r', str(APK)), 'APK installation failed')
 log = (ROOT/'expo-runtime.log').open('wb')
 logger = subprocess.Popen(BASE+['logcat','-T','1','-v','threadtime','ReactNativeJS:V','AndroidRuntime:V','Pakta:V','*:S'], stdout=log, stderr=log)
 try:

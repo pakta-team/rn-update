@@ -8,7 +8,7 @@ Bun 回归层。纯函数套件验证无 IO 决策与协议映射，客户端和
 CLAUDE.md: 本测试模块的成员、隔离策略与验证边界地图
 app.plugin.test.ts: Expo Config Plugin 契约回归；验证 channel 双端写入、无 channel 不动、非法值抛错与幂等重写
 androidHostWait.test.ts: JDK 17+ 编译完整真实 Android 宿主门面/编排器/结果类，替换 Android API/轮次 IO/配置核，验证独立短长等待、30 分钟默认、超时后结果复用、双代际拒绝与中断；不代表 JNI/ART 或系统主线程
-appleInstallRecord.test.ts: T11 Apple生产commit提取harness，断言共享摘要预检锁外、Unchanged锁内与零写/代际/tvOS窗口；公共switch身份/代际连线静态检查，真实安装规则另由Python链接Podspec共享核验证，不冒充Foundation
+appleInstallRecord.test.ts: T11 Apple生产commit提取harness，断言共享摘要预检锁外、Unchanged锁内与零写/代际/tvOS窗口；公共switch及归档holder接共享累计器的连线静态检查，真实语法/安装核另由Python验证，不冒充Foundation
 client.test.ts: Pakta 应用服务主回归；覆盖配置、错误管线、下载链、单例、原生配置同步和检查缓存
 clientActivation.test.ts: M1/T07 激活合约；受控原生回执验证 expectedHash、并发与同步重入单飞、拒绝/异常重试、reset 成败边界及旧结果不得置位、上报或清除新任务
 clientBoundaries.test.ts: M1 拆分前建立的特征测试；覆盖三端 channel/body、可写缓存字段与根响应、旧失败 slot ownership、公开网络/报告/激活方法替换、loggerPromise 替换、expectedHash 与查询参数模块状态隔离

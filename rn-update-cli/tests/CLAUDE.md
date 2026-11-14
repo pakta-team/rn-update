@@ -3,10 +3,11 @@
 
 成员清单
 
+account.test.ts: 缓存账号即时展示、后台刷新去重与失败隔离、凭据散列隔离和本地时钟续费窗口边界
 add-gitignore.test.ts: 凭据与构建目录忽略规则
 api.test.ts: HTTP、会话、token 与错误整形
 upload-progress.test.ts: standalone multipart 经共享传输发送流式请求体与按字节累计上传进度
-app-info-zip.test.ts: ZIP 原生包元信息读取
+app-info-zip.test.ts: 共享真实 ZIP/二进制 XML 夹具，锁定原生包元信息、bundle 精确条目、嵌套 HAP 和 plist 解析
 app.test.ts: 应用选择、渠道命令、缺失渠道自动创建、standalone UUIDv7 与创建原生回退地址映射
 auto-update.test.ts: CLI 自更新判定
 bundle-options.test.ts: bundle 参数归一化
@@ -14,7 +15,7 @@ bundle-pack.test.ts: PPK 打包内容、压缩策略及输出目标不可写时�
 bundle-runner.test.ts: Metro/Hermes 编排
 check-lockfile.test.ts: 包管理器锁文件识别
 check-plugin.test.ts: Sentry 缺省、单/双平台配置检测，锁定 bundle 参数与单次本地化日志
-cli-e2e.test.ts: CLI 命令入口端到端，覆盖非中文环境英文提示与认证失败引导；伪存储读完上传请求体再响应，阻断提前断连引起的 EPIPE 偶发
+cli-e2e.test.ts: CLI 真实进程入口，已登录/已缓存账号时以真实 APK binary XML、AAB protobuf、IPA plist、Harmony ZIP 验证四个 parse* stdout 可直接 JSON.parse 且零网络，对照常规命令保留账号/版本；另覆盖英文提示、认证失败与完整接收请求体的上传/发布伪服务
 cli-options.test.ts: 参数白名单与解析
 command-handlers.test.ts: 命令处理器映射
 command-result.test.ts: 命令结果协议
@@ -50,7 +51,7 @@ native-package.test.ts: 原生包精简与重打包（保留 resources.arsc 基�
 non-interactive.test.ts: CI 非交互模式
 options.test.ts: 通用参数读取
 package-optimization.test.ts: 原生包上传优化
-package.test.ts: buildTime 空白/非有限值原样字符串化、parseApp/Apk/Ipa JSON 剔除 bundle 字节、standalone 原生制品绑定、缺失渠道自动创建、精确重复短路与同版本换 JS 拒绝
+package.test.ts: buildTime 空白/非有限值原样字符串化、parseApp/Apk/Ipa/Aab JSON 剔除 bundle 字节、standalone 原生制品绑定、缺失渠道自动创建、精确重复短路与同版本换 JS 拒绝
 provider.test.ts: Provider API 映射
 resource-finder.test.ts: resources.arsc 资源表解析
 runtime.test.ts: Node/Bun 请求与进程运行时

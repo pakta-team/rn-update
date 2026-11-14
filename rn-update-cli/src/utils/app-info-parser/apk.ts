@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 APK ZIP、Android manifest 二进制 XML、资源表与图标资源解析器
- * [OUTPUT]: 对外提供 ApkParser，提取 Android APK 的应用元数据
- * [POS]: 应用包解析子域的 APK 实现，复用 Zip、ManifestParser 与 ResourceFinder
+ * [INPUT]: 依赖 parseBinaryXml 节点树与 ResourceFinder 的 resources.arsc 引用解析
+ * [OUTPUT]: 对外提供 ApkManifestInfo 与 parseApkManifest，读取版本和 application 直接子级的 meta-data
+ * [POS]: APK manifest 的纯解析边界；ZIP 与业务身份汇总由 utils/index 管理，未解析资源引用保持 undefined
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 

@@ -1,118 +1,21 @@
+/**
+ * [INPUT]: 依赖共享 ZIP/二进制 XML 夹具、APK/IPA 解析器与真实 ZIP 条目读取
+ * [OUTPUT]: 验证 manifest 属性、bundle 精确路径、嵌套 HAP 与 XML/binary plist 的解析契约
+ * [POS]: CLI 原生包格式边界回归；与入口测试共享制品写入器以避免两套格式构造
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { ZipFile as YazlZipFile } from 'yazl';
 import { ApkBundleFileName, IpaBundleFileName } from '../src/utils';
 import { parseApkManifest } from '../src/utils/app-info-parser/apk';
 import { parsePlist } from '../src/utils/app-info-parser/ipa';
 import { readZipEntries } from '../src/utils/app-info-parser/zip';
+import { binaryXml, writeZip } from './fixtures/native-package-fixtures';
 
 function mkTempDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-}
-
-async function writeZip(
-  zipPath: string,
-  entries: Record<string, string | Buffer>,
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const zipFile = new YazlZipFile();
-    for (const [name, content] of Object.entries(entries)) {
-      zipFile.addBuffer(
-        Buffer.isBuffer(content) ? content : Buffer.from(content),
-        name,
-      );
-    }
-    zipFile.outputStream.on('error', reject);
-    zipFile.outputStream.pipe(fs.createWriteStream(zipPath)).on('close', () => {
-      resolve();
-    });
-    zipFile.end();
-  });
-}
-
-// Minimal binary (AAPT) XML writer: a UTF-16 string pool plus start/end
-// element chunks whose attributes carry typed values.
-type Attr = [name: string, type: number, data: number | string];
-type Node = { name: string; attrs: Attr[]; children?: Node[] };
-
-function binaryXml(root: Node): Buffer {
-  const strings: string[] = [];
-  const ref = (s: string) => {
-    if (!strings.includes(s)) strings.push(s);
-    return strings.indexOf(s);
-  };
-  const u16 = (n: number) => {
-    const b = Buffer.alloc(2);
-    b.writeUInt16LE(n);
-    return b;
-  };
-  const u32 = (n: number) => {
-    const b = Buffer.alloc(4);
-    b.writeInt32LE(n);
-    return b;
-  };
-  const chunk = (type: number, headerSize: number, body: Buffer[]) => {
-    const data = Buffer.concat(body);
-    return Buffer.concat([
-      u16(type),
-      u16(headerSize),
-      u32(8 + data.length),
-      data,
-    ]);
-  };
-  const elements: Buffer[] = [];
-  const walk = (node: Node) => {
-    const name = ref(node.name);
-    const attrs = node.attrs.map(([attrName, type, data]) =>
-      Buffer.concat([
-        u32(-1),
-        u32(ref(attrName)),
-        u32(typeof data === 'string' ? ref(data) : -1),
-        u16(8),
-        Buffer.from([0, type]),
-        u32(typeof data === 'string' ? ref(data) : data),
-      ]),
-    );
-    elements.push(
-      chunk(0x0102, 16, [
-        u32(1),
-        u32(-1),
-        u32(-1),
-        u32(name),
-        u16(20),
-        u16(20),
-        u16(attrs.length),
-        u16(0),
-        u16(0),
-        u16(0),
-        ...attrs,
-      ]),
-    );
-    for (const child of node.children ?? []) walk(child);
-    elements.push(chunk(0x0103, 16, [u32(1), u32(-1), u32(-1), u32(name)]));
-  };
-  walk(root);
-  const encoded = strings.map((s) =>
-    Buffer.concat([u16(s.length), Buffer.from(s, 'utf16le'), u16(0)]),
-  );
-  const offsets: Buffer[] = [];
-  let at = 0;
-  for (const e of encoded) {
-    offsets.push(u32(at));
-    at += e.length;
-  }
-  const pool = chunk(0x0001, 28, [
-    u32(strings.length),
-    u32(0),
-    u32(0),
-    u32(28 + 4 * strings.length),
-    u32(0),
-    ...offsets,
-    ...encoded,
-  ]);
-  return chunk(0x0003, 8, [pool, ...elements]);
 }
 
 const TYPE_REFERENCE = 0x01;

@@ -2,7 +2,7 @@
 
 /**
  * [INPUT]: 依赖 cli.json 命令声明、动态命令加载器、会话存储、账号摘要前置提醒、版本提示、本地化文案与源码/编译产物时间戳
- * [OUTPUT]: 对外提供 Pakta CLI 进程入口；统一解析参数、恢复会话、调度命令、前置输出账号/续费状态和输出错误，并阻止源码仓库运行过期 lib
+ * [OUTPUT]: 对外提供 Pakta CLI 进程入口；统一会话、命令和错误出口，交互命令显示账号/版本，parse* 保持纯 JSON stdout，并阻止运行过期 lib
  * [POS]: CLI 最外层适配器，只负责进程生命周期与命令分发；业务发布、上传和网络协议下沉到 commands 与领域模块
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -98,19 +98,25 @@ async function run() {
   const versionOnly = ['-v', '--version', 'version'].includes(
     process.argv[2] ?? '',
   );
+  // JSON 命令只写业务结果，跳过账号 worker 和版本/自更新提示。
+  const jsonOnly = ['parseApp', 'parseIpa', 'parseApk', 'parseAab'].includes(
+    process.argv[2] ?? '',
+  );
   // The registry check for newer versions runs alongside the command (from a
   // 1-day cache when possible) and only ever delays `-v`/`version` itself; its
   // hint is printed once the command is done, or at exit for commands that
   // exit on their own.
-  const versionCheck = await printVersionCommand({ wait: versionOnly });
+  const versionCheck = jsonOnly
+    ? undefined
+    : await printVersionCommand({ wait: versionOnly });
   if (versionOnly) {
-    versionCheck.startAutoUpdate();
+    versionCheck?.startAutoUpdate();
     process.exit();
   }
   process.on('exit', (code) => {
     if (code === 0) {
-      versionCheck.printHints();
-      versionCheck.startAutoUpdate();
+      versionCheck?.printHints();
+      versionCheck?.startAutoUpdate();
     }
   });
 
@@ -135,15 +141,15 @@ async function run() {
     if (!handler) {
       throw new Error(t('unknownCommand', { command: argv.command }));
     }
-    if (argv.command !== 'me') {
+    if (!jsonOnly && argv.command !== 'me') {
       showCurrentAccount();
     }
     await handler(argv);
     // a check still in flight (cold cache) gets a short grace period; the
     // registry request itself is unref'd, so exiting never waits on it
-    await versionCheck.settle(500);
-    versionCheck.printHints();
-    versionCheck.startAutoUpdate();
+    await versionCheck?.settle(500);
+    versionCheck?.printHints();
+    versionCheck?.startAutoUpdate();
   } catch (err: any) {
     if (err?.status === 401) {
       console.log(t('loginFirst'));

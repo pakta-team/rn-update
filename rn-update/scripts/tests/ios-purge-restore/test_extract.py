@@ -1,13 +1,41 @@
-# [INPUT]: 依赖标准库 unittest 与 extract 的 declaration/exported_method/function/mask_literals/method/mutate
-# [OUTPUT]: 提供 8 例提取器回归：偏移换行保真、原型跳过、ObjC 声明/定义、无参方法、RCT_EXPORT_METHOD、静态初始化与字符串、fail-closed、突变漂移
+# [INPUT]: 依赖标准库 unittest、extract 提取器、真实 Apple/Status 源码及 C++17 宿主编译器
+# [OUTPUT]: 守护提取偏移/fail-closed/突变契约，并编译链接现提 Status 工厂以锁定 Foundation 宿主的最小真实核依赖
 # [POS]: ios-purge-restore 的提取器守护测试，Linux 可跑（unittest discover），锁定 fail-closed 与字面量掩码契约
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+import os
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
-from extract import declaration, exported_method, function, mask_literals, method, mutate
+from extract import declaration, exported_method, function, generate, mask_literals, method, mutate
 
 
 class ExtractionTests(unittest.TestCase):
+    def test_real_status_factory_linkage(self):
+        root = Path(__file__).resolve().parents[3]
+        prefix = ['wsl', '--exec'] if os.name == 'nt' else []
+        def native(path):
+            if os.name == 'nt':
+                return subprocess.check_output(['wsl', '--exec', 'wslpath', '-a', str(path)], text=True).strip()
+            return str(path)
+        with tempfile.TemporaryDirectory(prefix='pakta-apple-status-') as directory:
+            build = Path(directory)
+            generate(root / 'ios/RCTPakta/RCTPakta.mm', build)
+            (build / 'main.cpp').write_text('''#include "cpp/patch_core/patch_core.h"
+int main() {
+  const auto ok = pakta::patch::Status::Ok();
+  const auto error = pakta::patch::Status::Error("install rejected");
+  return ok.ok && ok.message.empty() && !error.ok && error.message == "install rejected" ? 0 : 1;
+}
+''', encoding='utf-8')
+            compiled = subprocess.run([*prefix, 'g++', '-std=c++17', '-Wall', '-Wextra', '-Werror',
+                '-I' + native(root), native(build / 'main.cpp'), native(build / 'status.cpp'),
+                '-o', native(build / 'status-test')], capture_output=True, text=True)
+            self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+            result = subprocess.run([*prefix, native(build / 'status-test')], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_preserves_offsets_and_lines(self):
         source = '/* {\n} */ @"escaped \\" { }"; // }\nconst char *x = R"tag({"})tag";'
         masked = mask_literals(source)

@@ -185,6 +185,7 @@ describe('packageCommands parse JSON', () => {
     ['parseApp', 'getAppInfo', 'release.app'],
     ['parseApk', 'getApkInfo', 'release.apk'],
     ['parseIpa', 'getIpaInfo', 'release.ipa'],
+    ['parseAab', 'getAabInfo', 'release.aab'],
   ] as const) {
     test(`${command} prints metadata JSON without bundle bytes`, async () => {
       const metadata = {

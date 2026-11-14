@@ -1,6 +1,6 @@
 #!/bin/sh
 # [INPUT]: 依赖 python3 unittest（test_extract.py，Linux 可跑）、macOS Foundation 与 Xcode 命令行工具、RCTPakta.mm 源体；SANITIZE=1 开内存消毒，VERIFY_REGRESSIONS=1 跑负控突变与编译探针
-# [OUTPUT]: 编译并运行 purge_restore_test 基线，负控下额外断言三类突变被指定失败消息捕获、TestDefaults 读写拒绝探针编译通过
+# [OUTPUT]: 链接真实共享状态/安装核及现提 Status 工厂，运行 Foundation 基线/三类行为负控与 TestDefaults 选择器编译探针
 # [POS]: scripts 的 iOS tvOS 清理恢复验证入口，与 test-patch-core.sh 同构；提取产物只落 .tmp 不入库
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 set -eu
@@ -39,6 +39,7 @@ build() {
   xcrun clang++ -std=c++17 -fobjc-arc -fblocks $WARNING_FLAGS $SANITIZE_FLAGS \
     -I"$ROOT_DIR" -I"$destination" \
     "$TEST_DIR/purge_restore_test.mm" "$ROOT_DIR/cpp/patch_core/state_core.cpp" \
+    "$destination/status.cpp" \
     "$ROOT_DIR/cpp/patch_core/digest.cpp" \
     "$ROOT_DIR/cpp/patch_core/install_record.cpp" \
     "$ROOT_DIR/cpp/update_flow_core/flow_json.cpp" \

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [INPUT]: 依赖 HAR tar、当前 Harmony ETS 源码、预期版本与双 ABI ELF 字节
+# [INPUT]: 依赖 Python3.8+ 标准库、HAR tar、当前 Harmony ETS 源码、预期版本与双 ABI ELF 字节
 # [OUTPUT]: 拒绝旧源码、错误版本/ABI、缺失安装/轮次/resume 注册的新输入候选
 # [POS]: scripts 的 HAR 发布输入闸门，不替代 LLVM 链接检查或设备 NAPI 验证
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -104,7 +104,7 @@ def check_har(har, version, source_root=ROOT):
             files = []
             for index, name in enumerate(libraries):
                 file = Path(directory) / f'{index} {Path(name).name}'
-                file.write_bytes(read(name.removeprefix('package/')))
+                file.write_bytes(read(name[len('package/'):]))
                 files.append(str(file))
             try:
                 result = subprocess.run(

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * [INPUT]: 依赖显式候选 tgz/HAR 摘要、DevEco、已配置的 Harmony 工程、hdc 目标与既有 prepare/WSL/Jest 入口
- * [OUTPUT]: 提供分阶段 Harmony 命令、真实差分门禁及 SDK/HAR/base/HAP/设备目标一致性摘要记录
+ * [INPUT]: 依赖显式候选 tgz/HAR 摘要、依赖/结果门卫、DevEco、Harmony 工程、hdc 目标与既有 prepare/WSL/Jest 入口
+ * [OUTPUT]: 提供分阶段 Harmony 命令、真实差分门禁及候选/HAR/base/HAP/设备身份与全套通过证明
  * [POS]: e2etest 跨平台 Harmony 编排层；物理隔离候选避免根 RN 污染，构建与设备入口共用，不持有签名或实现更新逻辑
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -19,6 +19,11 @@ const {
   syncSdk,
   stageSdk,
 } = require('./harmony-e2e-sdk');
+const { assertReusableDependencies } = require('./harmony-e2e-inputs');
+const {
+  assertHdcInstallSuccess,
+  assertHarmonyTestResults,
+} = require('./harmony-e2e-results');
 
 const PHASES = [
   'stage',
@@ -279,19 +284,29 @@ function build(ctx) {
     );
   const inputs = buildInputs(ctx);
   const tool = tools(ctx);
-  requireFile(tool.ohpm);
   const env = {
     ...tool.env,
     NODE_OPTIONS: ctx.env.NODE_OPTIONS || '--max-old-space-size=2048',
     NINJAFLAGS: ctx.env.NINJAFLAGS || '-j1',
     CMAKE_BUILD_PARALLEL_LEVEL: ctx.env.CMAKE_BUILD_PARALLEL_LEVEL || '1',
   };
-  removeGeneratedDependencies(ctx.project);
-  ctx.run(tool.node, [tool.ohpm, 'install', '--all'], {
-    cwd: ctx.project,
-    env,
-    label: 'Refresh exact HAR dependency',
-  });
+  const reuse = ctx.env.RNU_HARMONY_REUSE_DEPENDENCIES;
+  if (reuse && reuse !== '0' && reuse !== '1')
+    throw new Error('RNU_HARMONY_REUSE_DEPENDENCIES must be 0 or 1');
+  if (reuse === '1') {
+    const proof = assertReusableDependencies(ctx);
+    console.log(
+      `Harmony E2E: Reuse exact HAR dependency (${proof.files} files)`
+    );
+  } else {
+    requireFile(tool.ohpm);
+    removeGeneratedDependencies(ctx.project);
+    ctx.run(tool.node, [tool.ohpm, 'install', '--all'], {
+      cwd: ctx.project,
+      env,
+      label: 'Refresh exact HAR dependency',
+    });
+  }
   ctx.run(
     tool.node,
     [
@@ -330,6 +345,10 @@ function hapPath(ctx) {
 }
 
 function buildInputs(ctx) {
+  if (!ctx.env.RNU_HARMONY_SDK_TGZ)
+    throw new Error(
+      'Build/install/test requires an explicit SDK candidate tgz'
+    );
   const nativeRoot = path.join(
     ctx.sdkRoot,
     'harmony',
@@ -373,6 +392,11 @@ function buildInputs(ctx) {
   ]);
   return {
     project: fs.realpathSync(ctx.project),
+    candidateSha256: assertDigest(
+      ctx.env.RNU_HARMONY_SDK_TGZ,
+      ctx.env.RNU_HARMONY_SDK_SHA256,
+      'SDK candidate'
+    ),
     sdkSourcesSha256: crypto
       .createHash('sha256')
       .update(JSON.stringify(sources))
@@ -504,13 +528,10 @@ function install(ctx) {
   });
   const output = `${result.stdout || ''}${result.stderr || ''}`;
   console.log(output);
-  if (!/successfully/i.test(output))
-    throw new Error(
-      'hdc did not confirm a successful HAP installation; inspect signing and target'
-    );
+  assertHdcInstallSuccess(output);
   fs.writeFileSync(
     path.join(ctx.artifacts, 'harmony-install-inputs.json'),
-    `${JSON.stringify({ target: target[1], hapSha256: proof.hapSha256 }, null, 2)}\n`
+    `${JSON.stringify({ target: target[1], hapSha256: proof.hapSha256, candidateSha256: proof.candidateSha256 }, null, 2)}\n`
   );
 }
 
@@ -545,7 +566,7 @@ function check(ctx) {
   };
 }
 
-function testDevice(ctx, args) {
+function testDevice(ctx) {
   const target = deviceArgs(ctx);
   const report = check(ctx);
   const installed = JSON.parse(
@@ -556,7 +577,8 @@ function testDevice(ctx, args) {
   );
   if (
     installed.target !== target[1] ||
-    installed.hapSha256 !== report.build.hapSha256
+    installed.hapSha256 !== report.build.hapSha256 ||
+    installed.candidateSha256 !== report.build.candidateSha256
   )
     throw new Error(
       'HAP was not installed by this run on HDC_TARGET; rerun install'
@@ -566,6 +588,10 @@ function testDevice(ctx, args) {
     `${JSON.stringify(report, null, 2)}\n`
   );
   const tool = tools(ctx);
+  const results = path.join(ctx.artifacts, 'harmony-jest-results.json');
+  const success = path.join(ctx.artifacts, 'harmony-test-inputs.json');
+  fs.rmSync(results, { force: true });
+  fs.rmSync(success, { force: true });
   ctx.run(
     process.execPath,
     [
@@ -573,29 +599,39 @@ function testDevice(ctx, args) {
       '--config',
       'e2e/harmony.jest.config.js',
       '--runInBand',
-      ...args,
+      '--json',
+      '--outputFile',
+      results,
     ],
     {
       cwd: ctx.e2eRoot,
       env: {
         ...tool.env,
         HDC_PATH: tool.hdc,
+        HDC_TARGET: target[1],
         RNU_E2E_SKIP_PREPARE: 'true',
         RNU_E2E_FULL_FALLBACK: 'false',
       },
       label: 'Run Harmony device E2E with real diff gate',
     }
   );
+  const passed = assertHarmonyTestResults(results, ctx.e2eRoot);
+  if (JSON.stringify(check(ctx)) !== JSON.stringify(report))
+    throw new Error('Harmony inputs changed during the full suite');
+  fs.writeFileSync(
+    success,
+    `${JSON.stringify({ ...report, resultsSha256: hash(results), passed }, null, 2)}\n`
+  );
 }
 
 function main(argv = process.argv.slice(2), ctx = context()) {
   const [phase = 'check', ...args] = argv;
   if (!PHASES.includes(phase))
+    throw new Error(`Usage: run-harmony-e2e.js <${PHASES.join('|')}>`);
+  if (args.length)
     throw new Error(
-      `Usage: run-harmony-e2e.js <${PHASES.join('|')}> [Jest arguments for test]`
+      'Harmony phases do not accept extra arguments; test always runs the full suite'
     );
-  if (args.length && phase !== 'test')
-    throw new Error('Only test accepts additional arguments');
   const prepare = () => {
     syncSdk(ctx);
     if (ctx.env.RNU_E2E_SKIP_PREPARE !== 'true')
@@ -621,7 +657,7 @@ function main(argv = process.argv.slice(2), ctx = context()) {
     build: () => build(ctx),
     diff: () => diff(ctx),
     install: () => install(ctx),
-    test: () => testDevice(ctx, args),
+    test: () => testDevice(ctx),
     check: () => console.log(JSON.stringify(check(ctx), null, 2)),
   };
   if (phase === 'all')

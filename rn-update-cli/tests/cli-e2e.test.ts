@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖编译后的 CLI 入口、隔离 HTTP 伪服务、运行时环境变量与临时项目文件
- * [OUTPUT]: 验证 CLI 进程级语言输出、认证失败提示、上传和发布链路
+ * [INPUT]: 依赖真实 CLI 入口、隔离 HTTP 服务、原生包夹具、会话缓存与临时项目文件
+ * [OUTPUT]: 验证已登录 parse* 纯 JSON 管道、常规账号/版本提示、认证失败、上传与发布链路
  * [POS]: tests 的进程边界验收；对象存储替身完整接收请求体后响应，避免提前断连干扰上传结果
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -13,7 +13,8 @@ import {
   test,
 } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import {
   createServer,
   type IncomingMessage,
@@ -22,6 +23,7 @@ import {
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { binaryXml, writeZip } from './fixtures/native-package-fixtures';
 
 type CliResult = {
   status: number | null;
@@ -192,6 +194,194 @@ describe('CLI e2e', () => {
   afterEach(async () => {
     await closeServer?.();
     closeServer = undefined;
+  });
+
+  test('logged-in parse commands pipe only JSON while normal commands keep account and version hints', async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'pakta-parse-json-'));
+    const testHome = path.join(tempRoot, 'home');
+    const token = 'isolated-parse-session';
+    const accountKey = createHash('sha256')
+      .update(JSON.stringify([tempRoot, token, '']))
+      .digest('hex');
+    const accountDir = path.join(testHome, '.cache', 'pakta-cli', 'accounts');
+    await mkdir(accountDir, { recursive: true });
+    await writeFile(
+      path.join(tempRoot, '.pakta.token'),
+      JSON.stringify({ token }),
+    );
+    await writeFile(
+      path.join(accountDir, `${accountKey}.json`),
+      JSON.stringify({
+        account: { email: 'cached-parse@example.test', planCode: 'free' },
+        fetchedAt: Date.now(),
+      }),
+    );
+    const requests: string[] = [];
+    const server = createMockServer(requests);
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    closeServer = () =>
+      new Promise((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections?.();
+      });
+    const { port } = server.address() as AddressInfo;
+    const origin = `http://127.0.0.1:${port}`;
+    const env = {
+      ...process.env,
+      USERPROFILE: testHome,
+      HOME: testHome,
+      RNU_SERVICE_URL: '',
+      PAKTA_API_TOKEN: '',
+      PAKTA_REGISTRY: `${origin}/api`,
+      npm_config_registry: `${origin}/registry/`,
+      XDG_CACHE_HOME: path.join(testHome, 'cache'),
+      NO_INTERACTIVE: 'true',
+    };
+    try {
+      const bundle = 'pipeline-bundle-bytes';
+      const buildTime = 'opaque-build';
+      const versionName = '1.2.3';
+      const channel = 'production';
+      const metadata = { versionName, buildTime, channel };
+      const manifest = binaryXml({
+        name: 'manifest',
+        attrs: [['versionName', 0x03, versionName]],
+        children: [
+          {
+            name: 'application',
+            attrs: [],
+            children: [
+              {
+                name: 'meta-data',
+                attrs: [
+                  ['name', 0x03, 'pakta_build_time'],
+                  ['value', 0x03, buildTime],
+                ],
+              },
+              {
+                name: 'meta-data',
+                attrs: [
+                  ['name', 0x03, 'channel'],
+                  ['value', 0x03, channel],
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      const protobuf = require('protobufjs') as typeof import('protobufjs');
+      const root = await protobuf.load(
+        path.join(repoRoot, 'proto/Resources.proto'),
+      );
+      const XmlNode = root.lookupType('aapt.pb.XmlNode');
+      const aabManifest = Buffer.from(
+        XmlNode.encode(
+          XmlNode.fromObject({
+            element: {
+              name: 'manifest',
+              attribute: [{ name: 'versionName', value: versionName }],
+              child: [
+                {
+                  element: {
+                    name: 'application',
+                    child: [
+                      {
+                        element: {
+                          name: 'meta-data',
+                          attribute: [
+                            { name: 'name', value: 'pakta_build_time' },
+                            { name: 'value', value: buildTime },
+                          ],
+                        },
+                      },
+                      {
+                        element: {
+                          name: 'meta-data',
+                          attribute: [
+                            { name: 'name', value: 'channel' },
+                            { name: 'value', value: channel },
+                          ],
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          }),
+        ).finish(),
+      );
+      const packages = [
+        [
+          'parseApp',
+          'app',
+          {
+            'resources/rawfile/bundle.harmony.js': bundle,
+            'resources/rawfile/meta.json': JSON.stringify({
+              versionName,
+              pakta_build_time: buildTime,
+              channel,
+            }),
+          },
+        ],
+        [
+          'parseApk',
+          'apk',
+          {
+            'assets/index.android.bundle': bundle,
+            'AndroidManifest.xml': manifest,
+          },
+        ],
+        [
+          'parseIpa',
+          'ipa',
+          {
+            'Payload/Example.app/main.jsbundle': bundle,
+            'Payload/Example.app/pakta_build_time.txt': buildTime,
+            'Payload/Example.app/Info.plist': `<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>${versionName}</string><key>channel</key><string>${channel}</string></dict></plist>`,
+          },
+        ],
+        [
+          'parseAab',
+          'aab',
+          {
+            'base/assets/index.android.bundle': bundle,
+            'base/manifest/AndroidManifest.xml': aabManifest,
+          },
+        ],
+      ] as const;
+      for (const [command, extension, entries] of packages) {
+        const file = path.join(tempRoot, `release.${extension}`);
+        await writeZip(file, entries);
+        const result = await runCli({
+          args: [path.join(repoRoot, 'src/bin.ts'), command, file],
+          cwd: tempRoot,
+          env,
+        });
+        expect(result.status).toBe(0);
+        expect(result.stderr).toBe('');
+        expect(JSON.parse(result.stdout)).toEqual({
+          ...metadata,
+          bundleHash: createHash('sha256').update(bundle).digest('hex'),
+        });
+        expect(result.stdout).not.toContain(bundle);
+        expect(result.stdout).not.toContain('bundleFile');
+      }
+      expect(requests).toEqual([]);
+      const normal = await runCli({
+        args: [path.join(repoRoot, 'src/bin.ts'), 'apps', '--no-interactive'],
+        cwd: tempRoot,
+        env,
+      });
+      expect(normal.status).toBe(0);
+      expect(normal.stdout).toContain('rn-update-cli:');
+      expect(normal.stdout).toContain('cached-parse@example.test');
+      expect(normal.stdout).toContain('DemoApp');
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   test('runs apps command against a local API endpoint', async () => {

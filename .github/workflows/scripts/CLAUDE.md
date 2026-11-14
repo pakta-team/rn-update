@@ -1,12 +1,13 @@
 # scripts/
 > L2 | 父级: ../CLAUDE.md
 
-CI 辅助脚本层。Shell 入口处理 Android 多模拟器命令和 Firebase Emulator 生命周期，tvOS 生成器提供隔离的原生编译消费端，`functions/` 是 callable function 测试夹具；规则/JSON 文件只描述模拟器配置。
+CI 辅助脚本层。Shell 处理模拟器与 Firebase 生命周期，tvOS生成器和Windows Harmony入口提供隔离原生消费端，`functions/` 是 callable function 测试夹具；规则/JSON 文件只描述模拟器配置。
 
 ## 成员清单
 
 adb_all_emulators.sh: 将单条 adb 命令广播到当前运行的 emulator-* 设备
-create-tvos-host.js: 在明确空目录生成固定 RN-tvos0.85.3-3/React19.2.3 的 tvOS 应用/Podfile/Xcode 工程脚本，SDK副本仅去开发依赖以避免RN0.73污染、断言原生依赖同源，供arm64模拟器编译与最终应用链接
+create-tvos-host.js: 生成固定RN-tvos0.85.3-3/React19.2.3的tvOS应用/Podfile/Xcode工程，SDK副本仅去开发依赖并断言RN同源；宿主Swift源使RCTSwiftUI兼容运行库进入最终app链接，供arm64模拟器真编译
+run-harmony-windows-ci.ps1: 固定b5ed候选/ee0d HAR与source实体checkout，在不存在的D:\r\hw1115复制公共工程及外部签名，冻结依赖/codegen后串行复用共享build/diff/install/test；PlanOnly不复制或触碰设备，日志与输入JSON显式收集
 start-firebase-emulator.sh: 构建 functions 并启动/探活 Auth、Database、Firestore、Functions、Storage emulator
 start-firebase-emulator.bat: Windows 等价的 Firebase emulator 启动入口
 functions/: Firebase callable function TypeScript 夹具

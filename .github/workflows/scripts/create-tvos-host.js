@@ -42,6 +42,11 @@ fs.writeFileSync(path.join(destination, 'package.json'), JSON.stringify({
 }, null, 2) + '\n');
 fs.writeFileSync(path.join(destination, 'index.js'), "// Native compilation host; no JS bundle is executed.\n");
 fs.mkdirSync(path.join(destination, 'ios'));
+// RN0.85 的 RCTSwiftUI 含 Swift 静态对象；宿主 Swift 编译负责链接兼容运行库。
+fs.writeFileSync(path.join(destination, 'ios/SwiftRuntime.swift'), `import Foundation
+@objc(PaktaTVSwiftRuntime)
+final class PaktaTVSwiftRuntime: NSObject {}
+`);
 fs.writeFileSync(path.join(destination, 'ios/main.mm'), `#import <UIKit/UIKit.h>
 #import "RCTPakta.h"
 
@@ -81,6 +86,7 @@ fs.writeFileSync(path.join(destination, 'ios/create-project.rb'), `require 'xcod
 project = Xcodeproj::Project.new('PaktaTVValidation.xcodeproj')
 target = project.new_target(:application, 'PaktaTVValidation', :tvos, '15.1')
 target.source_build_phase.add_file_reference(project.main_group.new_file('main.mm'))
+target.source_build_phase.add_file_reference(project.main_group.new_file('SwiftRuntime.swift'))
 target.build_configurations.each do |config|
   config.build_settings.merge!({
     'PRODUCT_BUNDLE_IDENTIFIER' => 'space.yoghourt.pakta.tvvalidation',
@@ -90,6 +96,8 @@ target.build_configurations.each do |config|
     'CLANG_ENABLE_MODULES' => 'YES',
     'CLANG_ENABLE_OBJC_ARC' => 'YES',
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++20',
+    'SWIFT_VERSION' => '5.0',
+    'ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES' => 'YES',
     'CODE_SIGNING_ALLOWED' => 'NO'
   })
 end

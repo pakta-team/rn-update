@@ -6,7 +6,7 @@ CLI 命令、服务端适配与原生包身份解析。`api.ts` 是唯一 HTTP/�
 成员清单
 
 api.ts: 会话认证、旧服务兼容请求、独立 Go API 管理路径、CLI 会员权益与 Hermes base/渠道边界；上传统一代理、按分片大小限定期限、重试流重建和进度回滚，GCS 保持并行与旧服务整文件回退，standalone 保持串行 PUT、对象/会话定位及原始 ETag complete/失败 abort 语义
-bin.ts: Pakta 进程入口，统一参数解析、会话恢复、动态命令分发、顶层错误输出与本地化过期构建提示；源码仓库中的 src 比 lib 新时立即拒绝执行并要求重建，防止旧编译产物写入旧发布模型
+bin.ts: Pakta 进程入口，统一参数解析、会话恢复、动态命令分发、顶层错误输出与本地化过期构建提示；四个 parseApp/Apk/Ipa/Aab 命令跳过账号 worker、版本提示及自更新，使 stdout 只有 JSON；源码仓库中的 src 比 lib 新时立即拒绝执行并要求重建，防止旧编译产物写入旧发布模型
 app.ts: 应用选择/CRUD、渠道 CRUD 与缺失渠道幂等创建，持久化 appId/appKey；独立服务创建时把 downloadUrl 映射到 default 渠道 nativePackageUrl（遗留数字服务保持数字 appId 契约，独立服务支持 Go 服务生成的 UUIDv7），渠道命令输出统一走本地化资源
 bundle-runner.ts: 运行 Metro/Hermes bundle、选择和验证 Hermes base，并安全清理中间目录
 native-package.ts: 原生包上传前的 ZIP 精简与差分条目规则，只保留 JS bundle 和资源基线

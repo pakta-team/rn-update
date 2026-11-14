@@ -1,4 +1,7 @@
-# HarmonyOS e2e —— 目前仅手动触发（workflow_dispatch），尚未启用自动运行。
+# [INPUT]: 依赖显式 Harmony runner、进程级 Git LF 检出设置、候选/HAR、DevEco、外部签名和指定 HDC 目标
+# [OUTPUT]: 保留 macOS 手动矩阵，提供专用验证分支的 Windows 双 ABI Release/真实差分/设备链
+# [POS]: Harmony 运行编排；Windows 只在独立 source checkout 和全新短工程执行，不覆写本机主仓库
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 #
 # 需要一台自托管 runner（labels: self-hosted, macOS, harmony），机器上需一次性准备：
 #   - DevEco Studio + SDK（hdc 在 PATH，默认 DEVECO_HOME=/Applications/DevEco-Studio.app/Contents）
@@ -15,6 +18,20 @@ defaults:
 
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: Harmony runner platform
+        type: choice
+        options: [macos, windows]
+        default: macos
+  push:
+    branches:
+      - codex/verify-harmony-win-20261115
+    paths:
+      - .github/workflows/e2e_harmony.yml
+      - .github/workflows/scripts/run-harmony-windows-ci.ps1
+      - rn-update/**
+      - rn-update-cli/**
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,6 +39,7 @@ concurrency:
 
 jobs:
   e2e-harmony:
+    if: github.event_name == 'workflow_dispatch' && inputs.runner != 'windows'
     runs-on: [self-hosted, macOS, harmony]
     timeout-minutes: 40
     env:
@@ -102,3 +120,47 @@ jobs:
         if: always()
         run: |
           kill "$(cat Example/e2etest/.e2e-artifacts/.server.harmony.pid 2>/dev/null)" 2>/dev/null || true
+
+  e2e-harmony-windows:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/codex/verify-harmony-win-20261115') || (github.event_name == 'workflow_dispatch' && inputs.runner == 'windows')
+    runs-on: [self-hosted, Windows, X64, pakta-harmony-20261115]
+    timeout-minutes: 90
+    concurrency:
+      group: pakta-harmony-20261115-device
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: source/rn-update
+    env:
+      # 仅覆盖本 job 的 Git 配置，子模块继承；不写 self-hosted 用户全局配置。
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
+      RNU_HARMONY_SDK_SHA256: b5ed311d93edb83564357369a10dab59608012351bade92f6125cc6ac55de237
+      RNU_HARMONY_HAR_SHA256: ee0d33ebd0a469e889279943d4ad69ba4a3ad0b29e7a00a71839382c3f3146a8
+    steps:
+      - name: Checkout isolated validation source
+        uses: actions/checkout@v7
+        with:
+          path: source
+          submodules: recursive
+
+      - name: Validate explicit Windows inputs without mutation
+        run: '& ../.github/workflows/scripts/run-harmony-windows-ci.ps1 -PlanOnly'
+
+      - name: Run real Harmony candidate and device phases
+        run: '& ../.github/workflows/scripts/run-harmony-windows-ci.ps1'
+
+      - name: Preserve explicit validation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: harmony-windows-20261115-evidence
+          path: |
+            source/rn-update/Example/e2etest/.e2e-artifacts/harmony-ci/*.json
+            source/rn-update/Example/e2etest/.e2e-artifacts/harmony-ci/*.log
+            source/rn-update/Example/e2etest/.e2e-artifacts/harmony/*.json
+            source/rn-update/Example/e2etest/.e2e-artifacts/server.log
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,7 +1,7 @@
 # rn-update-cli/
 > L2 | 父级: ../CLAUDE.md
 
-独立 CLI/CI 发布工具。原生包解析器读取包内 `channel`（缺省 `default`），`--channel` 只做断言；opaque `buildTime` 按字符串透传。CLI 只有中文 locale 使用中文文案，其余语言统一使用英文，显式 `RNU_LANG` 优先于 POSIX locale 和系统 locale。除 me 命令外，每条命令执行前经 `src/account.ts` 以缓存优先展示账号/套餐状态，并由 detached 的 `account-worker` 后台刷新缓存（本地时钟判定续费窗口，数据源为 `/membership/me` 快照）；standalone 上传/发布遇到缺失渠道时按 code 自动创建；uploadApp 上传精简包并登记 packageKey/downloadUrl/Range 元数据，Hermes base 走管理 API，默认以二进制字面量、pretty dump 与 raw 操作数审计校验 base 等价性（DefineOwnById* 字符串操作数折叠 `<str>` 交 raw 核对），上报 detail 经 failure-fingerprint 脱敏并附 hermesBaseFingerprint 分组指纹，并以有界子进程失败安全回退 plain；服务端适配在 `src/api.ts` 与命令层收敛。
+独立 CLI/CI 发布工具。原生包解析器读取包内 `channel`（缺省 `default`），`--channel` 只做断言；opaque `buildTime` 按字符串透传。CLI 只有中文 locale 使用中文文案，其余语言统一使用英文，显式 `RNU_LANG` 优先于 POSIX locale 和系统 locale。常规命令（除 me）执行前经 `src/account.ts` 以缓存优先展示账号/套餐状态，并由 detached 的 `account-worker` 后台刷新缓存（本地时钟判定续费窗口，数据源为 `/membership/me` 快照）；四个 parseApp/Apk/Ipa/Aab 命令保持纯 JSON stdout，跳过账号/版本提示及后台自更新；standalone 上传/发布遇到缺失渠道时按 code 自动创建；uploadApp 上传精简包并登记 packageKey/downloadUrl/Range 元数据，Hermes base 走管理 API，默认以二进制字面量、pretty dump 与 raw 操作数审计校验 base 等价性（DefineOwnById* 字符串操作数折叠 `<str>` 交 raw 核对），上报 detail 经 failure-fingerprint 脱敏并附 hermesBaseFingerprint 分组指纹，并以有界子进程失败安全回退 plain；服务端适配在 `src/api.ts` 与命令层收敛。
 
 成员清单
 
@@ -24,12 +24,14 @@ src/utils/index.ts: APK/AAB/IPA/Harmony 原生包元信息读取器，固定 cha
 src/account.ts: 账号/套餐状态展示层，缓存优先（`~/.cache/pakta-cli/accounts/`，按 cwd+token 哈希隔离）并派发 detached worker 后台刷新；30 天续费窗口用本地时钟判定，被 bin 前置提醒与 user.me 消费
 src/account-worker.ts: 隔离刷新进程，require.main 守卫，15s deadline，拉取 `/membership/me` 快照展平后以 0600/0700 原子写缓存并回传父进程
 src/user.ts: login/logout/me 身份命令；me 汇总 `/auth/me` 身份与 `/membership/me` 套餐快照并打印账号摘要
-src/bin.ts: CLI 进程入口，统一参数解析、会话恢复、命令调度与错误出口；me 之外的命令前置输出账号/续费状态
+src/bin.ts: CLI 进程入口，统一参数解析、会话恢复、命令调度与错误出口；常规命令前置账号/续费状态，四个 parse* 命令以 JSON 为唯一 stdout，拒绝提示/后台刷新污染脚本管道
 cli.json: 命令参数白名单，定义 upload/publish/registerPdiff/update 的 channel、targets、deploymentIds（releaseIds 仅作旧别名）与精确构建选项
 
 渠道身份：包内 channel 保留大小写，--channel 严格断言；共享解析精确优先，仅唯一大小写兼容，歧义在写前失败。整批 targets 先预检再自动创建；服务端只支持小写新 code，缺失混合大小写身份拒绝创建替代渠道，历史 Beta/beta 仍可精确定位。
 
 CLI-09 续核：auto-update 复用用户缓存目录、环境开关和 PackageManager 类型，同时保留原类型导出；provider 的消息命令委托数据命令的同一会话/错误边界。补齐上游 PPK 不可写、ZIP 早期失败及 Sentry 单探针/三类回退共 6 项回归，Sentry 夹具使用临时 JSON 传参以跨 Windows/Bun 子进程运行；E2E 伪存储收完请求体再响应。2026-11-14 本地 lint/build/smoke 与全量 659 pass/69 skip/0 fail 通过，日志位于仓库外 TEMP/pakta-cli-sync-audit-20261114；69 skip 保留 Hermes/原生差分环境边界，不计通过，不替代 Actions 或设备验收。
+
+CLI-11 入口补验（2026-11-15）：历史 package 函数层的 JSON 断言未覆盖 bin 的账号/版本前后缀，本轮修复四个 parseApp/Apk/Ipa/Aab 入口，真实四格式已登录子进程 stdout 均可直接 JSON.parse 且不请求网络；普通 apps 对照仍显示缓存账号与版本。版本 banner 回注负控在 JSON.parse 失败，修复后全量 661 pass/69 skip/0 fail、typecheck/build/Node22 smoke 与定向 Biome 通过，证据在 TEMP/pakta-cli-json-20261115；不把此前三个 mocked parser 断言记为完整入口已验。
 
 法则: 包内身份优先·buildTime 不透明·dry-run 零写入·凭据按服务地址隔离
 

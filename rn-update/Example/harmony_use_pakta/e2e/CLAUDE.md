@@ -5,7 +5,7 @@ Harmony 专用 JavaScript 测试束。`app.tsx` 保持最小可观测 UI，entry
 
 ## 成员清单
 
-app.tsx: 带 testID 的最小更新页面与 UpdateProvider，同时暴露 markSuccess/upToDate 可观测事件
+app.tsx: 带 testID 的最小更新页面与 UpdateProvider，暴露 hash/lastError、公开 getUpdateMetadata 的原生 rolledBackVersion 及 markSuccess/upToDate 事件供真实状态断言
 entry.base.ts: 注册 Harmony e2e 基线 bundle
 entry.v1.ts: 注入 full 更新标签后复用基线入口
 entry.v2.ts: 注入 ppk diff 更新标签后复用基线入口

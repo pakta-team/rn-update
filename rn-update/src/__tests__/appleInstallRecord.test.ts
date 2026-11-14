@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖真实 Apple commit/公共切包/安装调用源码，使用 VM 提供受控 IO/状态锁与摘要回执
+ * [OUTPUT]: 守护锁外摘要/锁内身份复核、零写拒绝、代际及 tvOS 窗口，并核对共享归档调用接线
+ * [POS]: JS 层 Apple 生产提交提取测试；原始 ObjC++ 语法/真实共享核另由 Python 验证，不替代 Foundation
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
@@ -208,7 +214,7 @@ describe('Apple production commit extraction, shared IO seam', () => {
       'options.bundle_hbc_transform_meta = hbcTransform;'
     );
     expect(source).toContain('pakta::archive_limits::CheckExtractedDirectory(');
-    expect(source).toContain('_entries.Accept(');
+    expect(source).toContain('_entries.accumulator.Accept(');
   });
   test('public switch rechecks current/last authority and generation under the lock', () => {
     const begin = source.lastIndexOf('- (BOOL)switchVersion:');

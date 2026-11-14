@@ -6,6 +6,7 @@ CLI 基础设施与原生包解析。`index.ts` 读取三端固定 channel/build
 成员清单
 
 index.ts: APK/AAB/IPA/Harmony 元数据读取及 bundleHash 计算，buildTime 保持不透明字符串并读取固定 channel
+app-info-parser/: 原生归档格式边界，提供 ZIP 扫描、APK manifest/资源引用、IPA plist、AAB 转 APK 与 binary XML 解码，不再导出旧 Parser 类或图标链
 constants.ts: 品牌常量、当前 API 服务端点、Pakta 前端价格页、服务地址哈希凭据路径
 http-helper.ts: 独立服务判定、测试用健康探测与 URL 解析
 fs-helpers.ts: 平台缓存目录与 plain node:fs 文件系统原语（remove/ensureDir/emptyDirSync/moveSync），替代 fs-extra 子集

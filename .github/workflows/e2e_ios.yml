@@ -222,13 +222,14 @@ jobs:
 
       - name: Refresh JS bundle in cached app
         if: steps.cache-ios-app.outputs.cache-hit == 'true'
-        run: cd Example/e2etest && ./scripts/refresh-ios-app-bundle.sh
+        run: cd Example/e2etest && bash scripts/refresh-ios-app-bundle.sh
 
       - name: Detox test (ios.sim.release)
         env:
           RNU_CLI_ROOT: ${{ github.workspace }}/rn-update-cli
           RNU_E2E_SKIP_PREPARE: 'true'
-        run: cd Example/e2etest && E2E_PLATFORM=ios bunx detox test --configuration ios.sim.release --retries 1 ${{ matrix.jest-config }}
+        # Detox 的 CI 默认参数会覆盖 Jest 单 worker 配置；显式串行启动设备，避免两套件争用 runner 预算。
+        run: cd Example/e2etest && E2E_PLATFORM=ios bunx detox test --configuration ios.sim.release --retries 1 --maxWorkers 1 ${{ matrix.jest-config }}
 
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场

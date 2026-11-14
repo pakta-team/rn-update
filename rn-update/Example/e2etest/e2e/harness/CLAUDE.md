@@ -6,6 +6,6 @@ Harmony UI 自动化适配层。HarmonyDriver 将 hdc shell/uitest 输出规范�
 ## 成员清单
 
 CLAUDE.md: 驱动层职责、设备边界与成员地图
-harmony-driver.ts: hdc 设备控制、布局解析、节点查询、点击、带 RNOH 启动稳定窗口的重启与轮询等待原语
+harmony-driver.ts: hdc 显式目标设备控制、布局/节点/点击和带 RNOH 稳定窗口的重启轮询；安装复用共享 HDC 成功回执门卫，启动也拒绝 unsuccessfully 与 Fail/Error
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

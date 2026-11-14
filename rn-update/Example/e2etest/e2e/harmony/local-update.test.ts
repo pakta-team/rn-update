@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 HarmonyDriver、本地更新端口与测试设备上的 e2e bundle
- * [OUTPUT]: 对外提供 Harmony full/ppk/v2-track 更新流、健康确认和 up-to-date 端到端断言
+ * [INPUT]: 依赖 HarmonyDriver、共享版本 hash、本地端口与设备 e2e bundle 的原生回滚/错误观测
+ * [OUTPUT]: 验证 Harmony full/ppk/v2-track 更新、各阶段真实 hash、无错误/回滚及重启持久化
  * [POS]: e2e/harmony 的主业务验证套件，不实现 SDK 更新逻辑
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -16,6 +16,7 @@
  * - Artifacts + local server are handled by globalSetup (E2E_PLATFORM=harmony)
  */
 import { HarmonyDriver } from '../harness/harmony-driver.ts';
+import { LOCAL_UPDATE_HASHES } from '../localUpdateConfig';
 
 const BUNDLE_NAME =
   process.env.RNU_HARMONY_BUNDLE_NAME || 'com.charmlot.testpakta';
@@ -33,6 +34,14 @@ const RETRYABLE_RELOAD_TIMEOUT = 45000;
 const MAX_CHECK_UPDATE_ATTEMPTS = 2;
 
 const driver = new HarmonyDriver(BUNDLE_NAME);
+
+async function assertHealthyState(hash: string) {
+  const nodes = await driver.dumpLayout();
+  const text = (id: string) => nodes.find((node) => node.id === id)?.text;
+  expect(text('current-hash')).toBe(`currentHash: ${hash || '(empty)'}`);
+  expect(text('last-error')).toBe('lastError: (none)');
+  expect(text('rolled-back-version')).toBe('rolledBackVersion: (none)');
+}
 
 async function waitForBundleLabel(expectedLabel: string, timeout: number) {
   const expectedText = `bundleLabel: ${expectedLabel}`;
@@ -110,31 +119,37 @@ describe('harmony local update flow', () => {
     await driver.shell(`bm clean -n ${BUNDLE_NAME} -d`);
     await driver.launch();
     await waitForBundleLabel(LABELS.base, READY_TIMEOUT);
+    await assertHealthyState('');
   });
 
   it('applies the full package update (v1)', async () => {
     await tapCheckUpdateAndWaitForBundleLabel(LABELS.full);
     await waitForEvent('markSuccess');
+    await assertHealthyState(LOCAL_UPDATE_HASHES.full);
   });
 
   it('applies the ppk diff update (v2)', async () => {
     await tapCheckUpdateAndWaitForBundleLabel(LABELS.ppkPatch);
     await waitForEvent('markSuccess');
+    await assertHealthyState(LOCAL_UPDATE_HASHES.ppkPatch);
   });
 
   it('applies the v2-track diff update (v4)', async () => {
     await tapCheckUpdateAndWaitForBundleLabel(LABELS.v2Track);
     await waitForEvent('markSuccess');
+    await assertHealthyState(LOCAL_UPDATE_HASHES.v2Track);
   });
 
   it('keeps the applied update across a relaunch', async () => {
     await driver.relaunch();
     await waitForBundleLabel(LABELS.v2Track, READY_TIMEOUT);
+    await assertHealthyState(LOCAL_UPDATE_HASHES.v2Track);
   });
 
   it('reports up to date without switching bundles', async () => {
     await driver.tapById('check-update', { timeout: READY_TIMEOUT });
     await waitForCheckResult('upToDate');
     await waitForBundleLabel(LABELS.v2Track, READY_TIMEOUT);
+    await assertHealthyState(LOCAL_UPDATE_HASHES.v2Track);
   });
 });

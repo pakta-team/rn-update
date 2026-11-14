@@ -42,12 +42,16 @@ npm run harmony:e2e -- test
 
 - `prepare` 复用已有制品准备器。Windows 先生成 v1/v2/v4 full 输入并显式标记 `fullFallback=true`，此时不能作为真实差分证明；已就绪时可设置 `RNU_E2E_SKIP_PREPARE=true`。
 - `base` 先同步候选，再运行样例原有 `bundle-harmony --dev false --entry-file e2e/entry.base.ts`。制品准备会覆写 rawfile bundle，所以此阶段必须在 `prepare` 之后。对独立短工程，只同步 rawfile、显式 HAR、SDK Hvigor 插件，改写该副本的本地依赖和 `PAKTA_CPP_DIR` 引用；后者指向当前 SDK native glue 并由构建门禁复核，源工程与签名不变。
-- `build` 要求 `arm64-v8a` 与 `x86_64` 两个 ABI。它先验证已暂存 HAR 与 Hvigor 插件的摘要，只清理确认仍位于显式工程内的 `oh_modules` 和 `entry/oh_modules` 两个生成目录，再 `ohpm install --all`，固定 `buildMode=release` 构建并要求 signed HAP 存在。链接指向工程外时拒绝清理。成功后在制品目录写 `harmony-build-inputs.json`，绑定工程、生产源码、HAR、插件、base bundle 与 HAP 摘要。
+- `build` 要求显式候选 tgz 完整摘要及 `arm64-v8a` 与 `x86_64` 两个 ABI。它先验证已暂存 HAR 与 Hvigor 插件的摘要，只清理确认仍位于显式工程内的 `oh_modules` 和 `entry/oh_modules` 两个生成目录，再 `ohpm install --all`，固定 `buildMode=release` 构建并要求 signed HAP 存在。链接指向工程外时拒绝清理。成功后在制品目录写 `harmony-build-inputs.json`，绑定完整 tgz、工程、生产源码、HAR、插件、base bundle 与 HAP 摘要；即使只改变非 Harmony 文件的新候选也必须重建证明。
 - `diff` 不运行 Metro，不再覆写 base bundle；它在 HAP 构建后复用 `generate-platform-diffs-wsl.cjs` 生成真实 PPK 与 v2-track patch。原生平台的准备器若已产出真实差分，只验证并复用。
-- `install` 要求显式 `HDC_TARGET`，先复核构建摘要未过时，再只对该目标执行 `install -r` 并核对 hdc 的成功输出，写入 `harmony-install-inputs.json` 绑定目标与 HAP。证书变化时由调用方明确对同一目标卸载旧应用后重试；脚本不会自动选择第一台设备或卸载其它包。
-- `test` 复用现有 Harmony Jest runner，不改变设备 driver。它强制跳过 global prepare，要求 `manifest.platform=harmony`、`fullFallback===false` 且真实 patch 非空，并复核构建/安装摘要与当前 HAP、候选和目标一致，向忽略目录写入候选/HAR/HAP/制品摘要 `harmony-run-inputs.json` 后才运行设备测试。
+- `install` 要求显式 `HDC_TARGET`，先复核构建摘要未过时，再只对该目标执行 `install -r`，必须得到 `App installed successfully` 且不含 Fail/Error/unsuccessfully，写入 `harmony-install-inputs.json` 绑定目标、完整 tgz 与 HAP。证书变化时由调用方明确对同一目标卸载旧应用后重试；脚本不会自动选择第一台设备或卸载其它包。
+- `test` 固定完整 Harmony Jest runner，不接受任何附加参数或过滤。它强制跳过 global prepare，要求 `manifest.platform=harmony`、`fullFallback===false` 且真实 patch 非空，复核构建/安装证明与当前 tgz/HAP/目标一致，先写 `harmony-run-inputs.json` 并清除旧结果和旧成功证明。Jest 必须输出本次 `harmony-jest-results.json`，当前工程的业务六项及 smoke 三项全部 passed、无 skip/todo，且运行后输入摘要未变，才写 `harmony-test-inputs.json` 绑定候选/HAP/制品、结果 SHA256 与通过数量；命令退出零不足以通过。
 - `check` 检查候选、物理 SDK、依赖、构建摘要与真实制品并输出当前摘要；它不代表设备用例已通过。
 - `all` 按 `prepare → base → build → diff → install → test` 执行。远程 runner 可复用，开发机并行多平台时建议分阶段调用。
+
+默认每次 `build` 刷新 OHPM。已完成安装、只需重试 Hvigor 时，可显式设置 `RNU_HARMONY_REUSE_DEPENDENCIES=1`：入口先只读校验当前 HAR 完整摘要及其全部文件（本轮 43 个），要求 `entry/oh_modules/pakta` 实际落在当前短项目 `oh_modules/.ohpm` 内，文件清单与每个 SHA256 完全一致，HAR/安装/锁版本相等，entry manifest 固定 `file:../pakta.har` 且锁的唯一 Pakta 引用为当前 `../pakta.har` 本地文件。全部通过才跳过清理和 `ohpm install`，继续 Hvigor；任何不符直接失败，不自动重装或接受旧缓存。`0` 或未设置继续默认刷新，其它值拒绝。
+
+复用门卫不解包到工程；只读解析 gzip/TAR，拒绝损坏/截断、重复或大小写碰撞路径、路径穿越、链接成员、安装树内部 junction/软链接及隐藏的额外文件。它只证明本地 Pakta HAR 依赖，既不证明 RNOH/SDK 编译兼容，也不证明 HAP 已构建；不要在校验与构建期间并发修改工程输入。
 
 ## Windows 真实差分
 
@@ -65,8 +69,8 @@ npm run harmony:e2e -- diff
 
 ## 验证与证据边界
 
-`npm run test:harmony-orchestrator` 使用 Node 内置测试器跑持久正负控，验证身份摘要、物理隔离、错误制品与设备目标拒绝、生成目录安全范围和 Release 命令边界。它不调用真实 Hvigor、模拟器或设备，不能冒充 HAP/真实差分/E2E 通过。
+`npm run test:harmony-orchestrator` 使用 Node 内置测试器跑编排与结果两组持久正负控，验证候选/安装身份、隔离、真实差分、设备和清理边界、严格 HAR 复用及完整测试证明；覆盖失败安装文本、过滤/缺失/skip/错工程、陈旧 JSON 和测试中输入漂移。复用失败必须零命令并保留依赖。它不调用真实 Hvigor、模拟器或设备，不能冒充 HAP/真实差分/E2E 通过。
 
-设备套件使用本地 `31337` 端口，与 Android 本地 E2E 必须顺序运行；构建阶段可以并行。实际通过仍需记录候选与 HAR 摘要、构建日志、`check` 输出、设备目标、Jest 结果和重启后 v4 持久化，无 `rolledBackVersion`/`lastError`。现有 `LOCAL_WINDOWS_TEST.md` 保留机器路径手册，本文记录共用入口。
+设备套件使用本地 `31337` 端口，与 Android 本地 E2E 必须顺序运行；构建阶段可以并行。业务六项逐阶段校验 current-hash、lastError 和原生 getUpdateMetadata().rolledBackVersion，重启后仍要求 v4/hash 一致且无错误/回滚。增加观测 UI 后须重新 prepare→base→build→diff；旧 HAP 缺字段应失败。实际通过仍需记录候选/HAR 摘要、构建日志、`check`、设备目标、Jest JSON 与成功证明。现有 `LOCAL_WINDOWS_TEST.md` 保留机器路径手册，本文记录共用入口。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

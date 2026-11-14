@@ -10,9 +10,13 @@ assert-local-sdk.js: 在构建/测试前断言 Metro 与 RN CLI 均指向当前�
 build-real-service-android.js: 从环境变量生成忽略提交的基线/更新入口，并按 apk/ppk 模式构建网络配置一致、可参数化 channel/packageVersion 且不污染默认 Detox 配置的真服务 Android 制品
 build-local-device-android.js: 从局域网 endpoint 生成忽略提交的入口并构建连接本地 E2E server 的 Android Release APK，隔离模拟器的 10.0.2.2 默认值
 build-harmony-e2e.sh: 构建并安装 HarmonyOS e2e 基础应用；默认 release buildMode（debug hap 会跳过 markSuccess 导致重启回滚），hvigor 优先使用 DevEco 自带 Node 规避新版 Node 的 fs.rmdirSync 拒绝
-run-harmony-e2e.js: Node 跨平台分阶段 Harmony 入口（stage/sync/prepare/base/build/diff/install/test/check/all）；显式 tgz/HAR SHA256、样例物理 SDK 与 RN/RNOH 隔离、短工程双 ABI Release、WSL 真差分、显式 hdc 目标和 fullFallback=false 统一门禁，以构建/安装摘要拒绝旧 HAP 与假绿安装；不持有签名，参数见 harmony-e2e-map.md。
+run-harmony-e2e.js: Node 跨平台分阶段 Harmony 入口（stage/sync/prepare/base/build/diff/install/test/check/all）；构建/安装证明绑定完整 tgz、HAR、JS/glue/base/HAP 与显式设备目标，固定两套完整 Jest 并校验必需用例和运行前后输入，拒绝过滤/旧结果/假绿安装；默认刷新 OHPM，仅显式依赖复用且全量门卫通过时跳过，不持有签名，参数见 harmony-e2e-map.md。
 harmony-e2e-sdk.js: 候选输入边界，stage在安装前将完整摘要候选复制到样例忽略的.local-sdk路径，sync物理隔离SDK并逐字节核对生产源码，拒绝根开发依赖与React/RN/RNOH跨树解析；由run-harmony-e2e.js复用。
-harmony-e2e.test.js: Node 持久正负控，覆盖源码与候选摘要、根依赖污染、fallback/空补丁拒绝、显式设备、生成依赖目录清理越界及 Release 命令参数边界；不冒充实际构建或设备验收。
+harmony-e2e-inputs.js: 只读 gzip/TAR 与 OHPM 复用门卫，完整 HAR 文件 SHA256、版本、当前短项目 file:../pakta.har 清单/锁和项目内物理 store 必须一致；拒绝额外/缺失/漂移文件、链接逃逸、TAR 路径别名和损坏，不写工程或静默安装。
+harmony-e2e-results.js: helper 与设备驱动共享的 HDC 安装回执门卫，接受传统成功句及 SDK26 路径回执与 AppMod finish 的完整组合，拒绝 unsuccessfully/Fail/Error；验收 Jest 两套当前工程结果和九项必需测试，拒绝空套件、过滤、跳过、缺失和错工程结果。
+harmony-e2e-results.test.js: HDC 传统/SDK26 真实回执、缺失完成行与失败混入、伪绿色汇总、缺失/跳过/重复用例及错工程 Jest 结果的持久负控。
+hdc-sdk26-install-output.json: SDK26 真实安装 stdout 两行的 Base64 原字节夹具，保留成功句后的 ASCII 空格与 CRLF 且避免 Git 换行规范化，供共享结果门卫和 helper 安装证明回归使用。
+harmony-e2e.test.js: Node 持久正负控，覆盖候选/安装身份、RN 隔离、fallback、显式设备、清理边界、Release、严格 HAR 复用及完整测试证明；复用失败零命令，旧结果和测试中输入漂移不能生成成功证明，不冒充设备验收。
 harmony-e2e-map.md: 可供本机和临时 Windows runner 共用的分阶段命令、候选环境变量与证据边界，明确 prepare→base→build→diff 顺序及设备测试串行使用端口。
 compile-node-ts.js: 将 TS hook 编译到临时目录并解析 Node 可执行入口
 create-rn077-oldarch-project.js: 校验显式本地 tgz 后生成 RN 0.77.3/CLI 15.0.1 宿主；复制完整 JS/Node 编译配置与候选，清除仓库外类型别名、重定位 Metro/CLI 到安装树，拒绝覆盖既有工程
@@ -22,6 +26,7 @@ rn077-oldarch.test.js: Node 持久正负控，覆盖仓库外含空格 TEMP、�
 rn077-oldarch-map.md: RN077 生成/候选/Release/设备分层证据与未验边界，明确旧 TEMP smoke 不等于生成器全链通过
 detect-ios-simulator-type.js: 选择与 Detox 一致的 iOS 模拟器 runtime
 drive-expo-update-ui.py: 显式候选全文件/物理安装守门后，通过 ADB/UI Automator 验证隔离 Expo 宿主两策略四阶段更新与重启，拒绝非 probe/e2e 应用数据清理
+expo-ota-map.md: Expo57隔离宿主、候选安装、限定网络例外、共享制品准备与设备驱动的可重现命令和证据边界
 generate-platform-diffs-wsl.cjs: 在 Windows 无 hdiff 原生绑定时，通过显式 Android/Harmony 平台拓扑选择正确基线并生成真实差分
 ios-rescue-server.ts: §11 iOS 救砖实验的状态化本地 HTTP 服务
 load-compiled-e2e-hook.js: 加载 compile-node-ts 产物供 Jest global hook 转发
@@ -29,7 +34,7 @@ local-e2e-server.ts: 提供本地版本、制品、控制与状态接口
 prepare-local-update-artifacts.ts: 以 v1 Hermes HBC 为 epoch 生成 full/diff/ppk/v2-track 本地更新制品；显式 RNU_E2E_BUNDLER=expo 复用 Expo export:embed，Harmony 保持独立路径
 refresh-ios-app-bundle.sh: 复用缓存原生包并刷新当前 JS bundle/assets
 run-prepare-local-update-artifacts.js: Node 转发入口，调用 TS 制品准备脚本
-run-gradle.js: 跨平台调用 Android Gradle wrapper，统一 npm 与 Detox 的 Windows/Unix 行为
+run-gradle.js: Windows 调用批处理、Unix 用 sh 读取 Android Gradle wrapper，保留参数/退出码并消除跨系统检出执行位对 npm/Detox 的影响
 run-detox.js: 跨平台注入 E2E_PLATFORM 并调用 Detox CLI，消除 npm 脚本的 Unix 环境变量语法
 start-rn.sh: 启动 Metro/RN 开发服务并在退出时回收进程
 start-rn.js: 以 Node 托管 Metro 子进程并跨 Windows/Unix 转发终止信号

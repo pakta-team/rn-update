@@ -7,9 +7,9 @@ tvOS 清理恢复（purge-restore，上游 #646 后续）的原生行为验证�
 
 CLAUDE.md: 本测试宿主的成员、提取契约与验证边界地图
 README.md: 语义文档；运行命令、"Production code, not a second state machine" 契约、五类顺序表与负控说明（语义文档，不受 L3 约束）
-extract.py: 提取引擎；正则分词 + 字面量掩码（保偏移保换行）驱动花括号匹配，从 RCTPakta.mm 提取函数/方法/RCT_EXPORT_METHOD，fail-closed 于缺失/歧义/括号失衡，generate() 产出带 #line 的四个 .inc，--mutation 生成负控突变
+extract.py: 提取引擎；字面量掩码保偏移、花括号匹配且缺失/歧义即拒绝，从Apple源码生成四个.inc，从patch_core.cpp原文提取Status::Ok/Error为status.cpp，均带#line；--mutation只改测试副本
 purge_restore_test.mm: Foundation-only 测试宿主；TestDefaults NSObject 假体（doesNotRecognizeSelector 兜底）+ os_unfair_lock 持有断言 + 注入式等待/信号/截止缝隙，锁定五类提交顺序与 defaults 隔离；tvOS/DEBUG 宏替换仅限本 TU
-test_extract.py: 提取器守护测试；8 例锁定偏移保真、原型跳过、fail-closed 与突变漂移，unittest discover 在 Linux 即可运行
+test_extract.py: 提取器守护测试；9例锁定偏移保真、原型跳过、fail-closed/突变漂移及现提Status工厂独立编译链接，unittest discover在Linux即可运行
 test_apple_split.py: 展开真实生产片段，校验未改守卫/启动方法摘要、唯一包含/执行器及800行和Podspec内外边界
 apple-characterization.json: 拆分前生产翻译单元和关键方法 SHA-256，只作旧行为基线，不用新轮次覆盖旧摘要
 test_round.py: 严格提取生产命令循环并以 C++17/Werror 链接真实核心回放；IO/finish 受限替换，负控关闭救援标记必须失败，不是 Apple 编译
@@ -38,5 +38,7 @@ T11 Apple增量：Foundation构建入口补链接install_record.cpp/flow_json.cp
 2026-11-14 远程首轮补缺：真实 macOS Foundation job 编译发现宿主没有同步渠道身份与版本级清理协作者。提取器现从生产展开源码纳入 `keyBinaryChannel`、`PaktaClearVersionScopedState`，宿主只增加固定测试渠道的 IO 接口，不改生产方法体。Linux JNI job 的 JDK 25 native-access 提示通过显式 JVM 授权解决，`-Xcheck:jni` 与警告拒绝仍保留；本段仅登记修复，实际 Mac 通过需以后续 run 证明。
 
 2026-11-15 真实 Expo iOS 编译揭示旧 guard 测试转换成 C++ 后漏检 ObjC ivar 语法。新正控现取 holder、完整 @interface 与 init 原文，以 clang++ Objective-C++ 模式只做语法检查；内联 ivar 初始化器和去除 holder 默认构造两条突变必须编译失败。Linux 最小 NSObject/协议仅补语法依赖，不链接 Foundation，完整 Apple 编译仍由真实 Mac workflow 证明。
+
+2026-11-15 第二轮Mac已越过编译，但链接缺少commit/install_record使用的Status::Ok/Error。extract现从真实patch_core.cpp提取这两段工厂定义为独立status.cpp，Foundation入口链接该TU，既不手写替身工厂也不拖入整个补丁引擎及其解码依赖；新增真实提取/编译/链接回归，提取器9/9通过。完整Foundation基线/行为负控仍须下一轮Mac执行，不将Linux Status链接记作原生顺序通过。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

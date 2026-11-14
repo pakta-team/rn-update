@@ -37,7 +37,17 @@ Release 构建通过；instrumentation 依赖因 Google Maven 超时，最后通
 
 原 TEMP node_modules 缺运行文件，按相同 name/version 从完整 Expo 示例补齐缺失文件，不覆盖候选 SDK；版本冲突为 0。Metro 限单 worker 后 Release 构建通过：APK SHA-256 `f379a02e859a0acdb3a3c1b9641cbf5d8471984ada9f7448e4782ad5261deb77`，仅 x86_64 SDK SO 入包并与候选一致，无 probe bundle。
 
-通过 CLI `--expo` 实际 export:embed 生成 HBC98 四 PPK；v2/v3/v4 的 v1 base-bytecode 编译验证等价，6145 functions。三个真实补丁经 WSL 当前 CLI 生成，manifest 禁 full 兜底。设备更新链完成后补入本节；Expo57 不支持旧架构，不能计为 Expo 旧桥验证。
+通过 CLI `--expo` 实际 export:embed 生成 HBC98 四 PPK；v2/v3/v4 的 v1 base-bytecode 编译验证等价，6145 functions。三个真实补丁经 WSL 当前 CLI 生成，manifest 禁 full 兜底。首次设备请求被 Android 明文网络策略拒绝，随后仅在测试宿主允许10.0.2.2/127.0.0.1并重建Release，保留SDK默认网络策略；当前实跑APK为`93272b4f6314b828f11a83304efb4aeabb6375525520ac1b7301cf9add416b14`，设备拉回摘要相同。
+
+`expo-durable/expo-runtime-result.json` 为 passed，28个UI观察帧覆盖即时/延后两策略各full→diff→pdiff→v2-track，逐阶段markSuccess、进程重启保持及最终upToDate；延后下载先断言旧版本仍活动再重启激活。候选900文件守门、错摘要负控、HBC98基座bundle与x86_64库绑定见`expo-network-artifact-identity.json`及[Expo OTA地图](../scripts/expo-ota-map.md)。Expo57不支持旧架构；未执行真正坏JS救砖。
+
+## 最终候选的平台消费输入等价
+
+最终`TEMP/pakta-release-7uet8M/rn-update-1.1.0.tgz`的完整SHA-256仍为`b5ed311d93edb83564357369a10dab59608012351bade92f6125cc6ac55de237`，与先前83Z1Iy包完全相同。对历史989603包各900文件比对，891文件相同，9处差异仅7份Apple源码与2份Apple地图；scripts目录实际不发包，Python3.8 checker修复不改变此候选。
+
+`android-matrix-final-candidate-equivalence.json`另对三个宿主实际消费树核对最终包的848份JS/Android/共享C++/Harmony文件及包入口配置，差异均为0；重新读取三个已从设备拉回的APK，核对原报告摘要、HBC96/98、基座bundle及全部SDK SO。RN085/RN077各4 ABI、Expo仅x86_64库均与最终包逐字节相同，probe.bundle均不存在；分宿主回执为`rn085-final-candidate-equivalence.json`、`rn077-final-candidate-equivalence.json`、`expo-network-final-candidate-equivalence.json`。
+
+原设备报告中的989603候选与APK摘要保持不变。以上证明未变平台消费输入等价，不改写为以完整b5ed归档重建并重跑设备，也不证明Apple变更、其他ABI执行或全端发布准入。
 
 ## 构建边界修复
 

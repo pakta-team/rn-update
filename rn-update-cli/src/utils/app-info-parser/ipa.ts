@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 bplist/cgbi 解码、IPA ZIP、图标资源和平台元数据解析工具
- * [OUTPUT]: 对外提供 IpaParser，提取 iOS 应用的版本、标识和图标信息
- * [POS]: 应用包解析子域的 IPA 实现，兼容压缩 PNG 与 binary plist 变体
+ * [INPUT]: 依赖 bplist-parser 的 binary plist 解码与 plist 包的延迟 CommonJS/ESM 加载
+ * [OUTPUT]: 对外提供 parsePlist，解析 XML/BOM XML 或 binary Info.plist 并拒绝未知格式
+ * [POS]: IPA 属性列表的纯解析边界；ZIP 条目和应用身份由 utils/index 汇总，不再承担图标解析
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 

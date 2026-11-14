@@ -1,12 +1,12 @@
 /**
  * [INPUT]: 依赖 rn-update 的 Pakta/UpdateProvider/useUpdate 与 localUpdateConfig 端点常量。
- * [OUTPUT]: 对外提供 Harmony e2e 最小 App，暴露 bundle label、hash、进度、生命周期事件和检查结果 testID。
+ * [OUTPUT]: 对外提供 Harmony e2e 最小 App，暴露 bundle/hash、原生回滚版本、错误、进度、事件及检查结果 testID。
  * [POS]: e2e bundle 的可观测 UI，被 entry.base/v1/v2/v4 共同复用并由 hdc 驱动断言。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Pakta, UpdateProvider, useUpdate } from 'rn-update';
+import { getUpdateMetadata, Pakta, UpdateProvider, useUpdate } from 'rn-update';
 import {
   getLocalUpdateEndpoint,
   LOCAL_UPDATE_APP_KEY,
@@ -53,6 +53,9 @@ function App() {
       <Text style={styles.welcome}>rn-update harmony e2e</Text>
       <Text testID="bundle-label">bundleLabel: {bundleLabel}</Text>
       <Text testID="current-hash">currentHash: {currentHash || '(empty)'}</Text>
+      <Text testID="rolled-back-version">
+        rolledBackVersion: {getUpdateMetadata().rolledBackVersion || '(none)'}
+      </Text>
 
       <Pressable
         testID="check-update"

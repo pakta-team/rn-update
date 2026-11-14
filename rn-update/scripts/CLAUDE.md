@@ -20,7 +20,7 @@ check-package-types.js: test:pack 真实 pack（含 prepack）或接收 tgz/--sh
 package-candidate.js: 共享候选身份/摘要/规范路径/重复文件校验，拒绝软硬链接等特殊条目；按已验证成员读取原始字节而不解压，不打包、不发布
 package-candidate.test.js: 临时tgz正控及错名/错版本/错摘要双入口失败负控；静态约束两分支发布路径和原权限
 prepare-release.js: release:prepare 先验版本/Android库，含prepack真实pack一次；同一tgz进入清单和消费检查，复核摘要后输出GITHUB_OUTPUT，绝不发布
-check-harmony-har.py: HAR输入闸门，校验元数据与BuildProfile版本、release模式及DEBUG=false、当前全部ETS源码字节、双ABI ELF及21个安装/轮次/resume注册名；全部.so临时副本经Node参数数组执行同一禁串门禁，缺Node或超时失败；拒绝危险/重复条目，不替代LLVM链接或设备验证
+check-harmony-har.py: Python3.8+ HAR输入闸门，校验版本/release/DEBUG=false、全部ETS字节、双ABI ELF及21注册；已验证package/前缀用切片移除，兼容Harmony CI容器3.8；全部.so副本由Node参数数组执行禁串门禁，缺Node或超时失败，不替代LLVM链接或设备验证
 test-binary-strings-har.py: 必须显式--har的新增专项，验证全部库参数数组/空格路径、额外库禁串/空文件、缺Node拒绝，以及真实HAR四库逐一两种禁串注入和双ABI缺库；不修改既有HAR测试
 test-harmony-har.py: 合成HAR正负控覆盖版本/BuildProfile/源码/ABI/注册/条目边界；--har显式读取真实Release正控并仅突变BuildProfile三个字段验证拒绝，未传入则明确skip真实产物测试，不把合成ELF记为链接证据
 check-release-version.js: 校验发布 tag 与 SDK/CLI package.json、oh-package.json5、BuildProfile.ets 版本一致
@@ -41,7 +41,7 @@ native-binding-parity.js: T09 四端校验内核，复用 AST 契约检查参数
 release-version.js: 以 rn-update-cli/package.json（patch-worker 的 Docker 输入）为默认来源，统一同步 SDK、CLI 与 Harmony 发布版本；支持 --check
 generate-flow-vectors.ts: 从 TypeScript 决策核心生成 C++ 共用的更新流测试向量
 prepublish.ts: npm 发布前解析 tag，并调用 release-version.js 同步 SDK/CLI/Harmony 版本后串联文件和原生产物检查
-test-ios-purge-restore.sh: 先跑提取器 unittest（Linux 可跑），再在 macOS 编译运行 tvOS 清理恢复原生测试；SANITIZE/VERIFY_REGRESSIONS 控制消毒与负控
+test-ios-purge-restore.sh: 先跑提取器 unittest及真实Status工厂链接回归，再在macOS链接共享状态/安装/摘要/JSON核及现提Status定义，运行tvOS清理恢复顺序；SANITIZE/VERIFY_REGRESSIONS控制消毒与负控
 test-tvos-podspec.rb: 只读加载真实Podspec，CocoaPods 1.16.2 Spec/consumer验证14宿主×新旧架构、独立平台/Network/PaktaPrivacy隐私声明/Expo依赖；子进程运行三个内存突变并核对命名失败集合，夹具仅写系统TEMP
 test-patch-core.sh: 独立编译并运行补丁核心与 HBC 变换测试，再执行 T11 真实安装核心回归
 test-install-core.sh: 以本地 patch::Status/PatchManifest、digest、flow_json 与真实文件 IO 编译安装核心和向量；SANITIZE=1 启用 ASan/UBSan，BUILD_DIR 可隔离编译物
@@ -142,5 +142,9 @@ Harmony CMake 的 Release 分支以 `-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_D
 - `ruby scripts/test-tvos-podspec.rb`（WSL/CocoaPods）：28宿主/架构组合通过，三个命名突变拒绝；`python3 -B -m unittest discover -s scripts/tests/ios-purge-restore -p 'test_*.py' -v`：18项通过，均非Xcode/Foundation原生构建。
 
 完整源码同步结果见 ../../UPSTREAM_SYNC_RESULT.md；旧c240与旧caa3 HAR仅为历史输入，不能绑定本轮源码。当前Apple原生产物、完整HAP/设备与Actions仍待独立验证。
+
+## 2026-11-15 Harmony CI Python3.8 兼容
+
+远程job132508709447已构建真实Release HAR，随后容器Python3.8.10在`str.removeprefix`处失败。checker在条目已验证以package/开头后改等价定长切片，不扩大路径许可或跳过禁串；实际CPython3.8.20 Windows执行现存HAR入口、5项HAR回归及4项禁串回归全部通过、零skip，源码21份/双ABI各21注册/4库保持，证据`TEMP/pakta-platform-validation-20261114/har-python38-verification.json`。不是远程Linux容器复跑或HAR重建；scripts目录不在实际npm发包清单内，本修复不改变b5ed候选字节。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

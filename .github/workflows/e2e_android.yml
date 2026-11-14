@@ -1,6 +1,6 @@
 # [INPUT]: 依赖当前 SDK/CLI、固定 NDK 与 React Native 消费端工程
 # [OUTPUT]: 提供同轮四 ABI 库及 Android Release/Debug/旧架构设备验证
-# [POS]: Android 宿主矩阵；下游必须校验并消费本轮原生构建产物
+# [POS]: Android 宿主矩阵；校验同轮原生库，action 内设备命令显式定位 workspace 中的宿主
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 name: e2e-android
 
@@ -195,10 +195,10 @@ jobs:
           # 每条命令自带 cd:android-emulator-runner 逐行起独立 shell,
           # 单独一行的 cd 不会保持到下一条(实测 detox 会在仓库根找不到 jest)
           script: |
-            cd Example/e2etest && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
+            cd "$GITHUB_WORKSPACE/rn-update/Example/e2etest" && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
             # 原生冷启动检测有自己的 runner 配置(见 e2e/native/jest.config.js);
             # Android 这个 job 有预算,不必像 iOS 那样拆成独立 job
-            cd Example/e2etest && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1 --config e2e/native/jest.config.js
+            cd "$GITHUB_WORKSPACE/rn-update/Example/e2etest" && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1 --config e2e/native/jest.config.js
 
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
@@ -330,8 +330,8 @@ jobs:
           # cd 不会跨行生效,所以每行必须自包含。
           script: |
             for i in $(seq 1 90); do curl -sf http://localhost:8081/status >/dev/null && break; sleep 2; done
-            curl -sf --max-time 420 -o /dev/null "http://localhost:8081/index.bundle?platform=android&dev=true&minify=false" || { echo '::error::Metro dev bundle failed to build'; tail -n 100 Example/e2etest/.e2e-artifacts/metro.log; exit 1; }
-            cd Example/e2etest && bunx detox test --configuration android.emu.debug --config e2e/smoke/jest.config.js --no-start --headless --record-logs all --retries 1
+            curl -sf --max-time 420 -o /dev/null "http://localhost:8081/index.bundle?platform=android&dev=true&minify=false" || { echo '::error::Metro dev bundle failed to build'; tail -n 100 "$GITHUB_WORKSPACE/rn-update/Example/e2etest/.e2e-artifacts/metro.log"; exit 1; }
+            cd "$GITHUB_WORKSPACE/rn-update/Example/e2etest" && bunx detox test --configuration android.emu.debug --config e2e/smoke/jest.config.js --no-start --headless --record-logs all --retries 1
 
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
@@ -488,8 +488,8 @@ jobs:
           emulator-boot-timeout: 900
           # 每条命令自带 cd,理由同上
           script: |
-            cd .e2e-rn077-oldarch/AwesomeProject && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
-            cd .e2e-rn077-oldarch/AwesomeProject && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1 --config e2e/native/jest.config.js
+            cd "$GITHUB_WORKSPACE/rn-update/.e2e-rn077-oldarch/AwesomeProject" && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
+            cd "$GITHUB_WORKSPACE/rn-update/.e2e-rn077-oldarch/AwesomeProject" && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1 --config e2e/native/jest.config.js
 
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场

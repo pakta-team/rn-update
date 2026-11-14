@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 AAB ZIP 读取、Android manifest/resource 解析、文件系统与外部包工具
- * [OUTPUT]: 对外提供 AabParser，提取 Android App Bundle 的版本和资源元数据
- * [POS]: 应用包解析子域的 AAB 实现，与 ApkParser 共享基础 ZIP/资源解析协议
+ * [INPUT]: 依赖 bundletool/npx 子进程、文件系统原语与 ZIP universal.apk 提取
+ * [OUTPUT]: 对外提供 extractApk，将指定 AAB 模块集合转换为 universal APK
+ * [POS]: AAB 上传的格式转换边界；元数据读取留在 utils/index，提取后的 APK 复用同一上传解析链
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 

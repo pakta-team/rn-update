@@ -7,7 +7,7 @@
 
 CLAUDE.md: e2e 套件拓扑、runner 边界与成员地图
 android-boundaries.test.ts: Android Release 真实损坏/缺失 diff 拒绝、已确认版本保持与进程重启回归；临时制品写入始终恢复，manifest 禁全量兜底
-ANDROID_DEVICE_MATRIX.md: 当前候选到新旧架构/Expo宿主、制品与设备的摘要关联，记录真实差分、故障、重启证据及未验边界
+ANDROID_DEVICE_MATRIX.md: 新旧架构/Expo制品到设备的原始摘要，以及最终b5ed候选848份平台消费输入与三宿主/设备APK的等价证明；分开记录真实运行、故障、重启和未验边界
 bundle-hash.test.ts: 读取 iOS 缓存或 Android 原生桥诊断，以跨平台 ZIP 解析核对 bundleHash 与字节摘要
 detox-hooks.d.ts: Detox globalSetup/globalTeardown 的环境声明
 entry.brick.ts: §11 救砖实验的故障 bundle 入口，故意在启动后触发崩溃

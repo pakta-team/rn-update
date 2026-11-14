@@ -7,9 +7,9 @@ CI 编排层。YAML 工作流把 npm/bun 校验、Android/iOS/Harmony E2E、发�
 
 ci-failure-email.yml: 常规分支失败 run 的 issue 通知与恢复关闭；codex/verify- 验证分支不创建、评论或关闭 issue
 cli.yml: master/main/codex验证分支 push 与 CLI 相关 PR 执行静态/单测、精确 Node 18.17 smoke、固定四组 Hermes 编译器与夹具 Hash 验证及 seeded fuzz；接线不代表远端已通过
-e2e_android.yml: 先重建四 ABI SO 并发布 SHA256SUMS，设备矩阵下载校验同轮产物；RN077 先以同轮 SO/声明生成显式 tgz，再由生成器与构建前后守卫绑定候选及旧架构，不用源码链接覆盖候选
-e2e_harmony.yml: Harmony HAP 构建、安装与 hdc 测试
-e2e_ios.yml: iOS 模拟器 core/native 两组更新链路；CLI 输入也触发，Homebrew/ccache/Metro 仅受信 master/main push 的 core 保存 UTC 每日快照，PR/native 只读；已编译 app 保留原生输入精确 key
+e2e_android.yml: 先重建四 ABI SO 并发布 SHA256SUMS，设备矩阵下载校验同轮产物；RN077 以同轮 SO/声明生成显式 tgz并由构建前后守卫绑定旧架构；emulator action 的独立 shell 以绝对 workspace 路径定位宿主，不依赖 run 默认目录
+e2e_harmony.yml: 保留Mac手动构建/设备链；Windows仅精确codex/verify-harmony-win-20261115 push或显式dispatch windows，唯一runner label、source隔离checkout和全新D:\r\hw1115，固定候选/HAR后跑双ABI Release、WSL真差分与完整设备suite
+e2e_ios.yml: iOS 模拟器 core/native 两组更新链路，显式单worker且保留一次重试；CLI输入触发，受信main/master core才写每日内容缓存；app保留原生精确key，命中后显式bash读644刷新脚本
 expo_build.yml: Expo57/RN0.86.3 Android/iOS Release 源码消费编译；隔离本地 SDK 并断言依赖归宿主，prebuild 后编译 Kotlin/Swift/共享核，Apple 显式确认 Expo subspec、bundleURL flag 与 Delegate 注册；不代表设备更新或发布候选
 lint.yml: master/main 的 PR/push 与 codex验证分支 push 执行 SDK Biome、TypeScript、Harmony 声明和 Native Spec 一致性检查
 publish.yml: 四ABI重建后、上传前以Node24执行禁串/Android verifier正负控；同步Release版本后重建分支显式release构建HAR、校验并以--har执行BuildProfile及新增禁串专项；两分支release:prepare各仅pack一次，同一tgz清单/声明消费后发布前核对SHA-256，保留OIDC/contents与provenance/public/beta权限；复用HAR仍显式校验前版版本，不硬套当前版本专项
@@ -47,5 +47,25 @@ GitHub API 实查 `pakta-team/rn-update` 默认 main，main/master 当时均为 
 首轮 Expo iOS 在 Xcode26.4.1 真正编译 SDK 时发现 ObjC ivar 不能含 C++ brace initializer；私有 holder 修复及原始 Objective-C++ 语法正负控见 SDK Apple 地图，Linux源码job显式安装clang。RN077首轮因未提供候选而失败，现先下载/验证同轮四ABI，生成声明后只pack一个Android用途tgz，写入RNU_SDK_TARBALL/SHA256供生成器安装；后续不再用checkout链接替换候选，构建前及Release后守卫均执行，并保存候选身份。这不是跨平台发布候选或HAR准入。
 
 tvOS新增真实macos-26/Xcode26.4 job：固定RN-tvos0.85.3-3/React19.2.3，独立应用下实体隔离SDK并核对源码/RN归属，生成CocoaPods/Xcode tvOS应用，经arm64 appletvsimulator Release编译、最终链接，核对RCTPakta类符号及Network.framework。它不执行tvOS设备更新；本地首轮安装696包暴露file依赖把SDK开发RN0.73装进嵌套目录，归属守卫确实失败；隔离副本仅删devDependencies后重新安装413包、归属与关键源码守卫、真实RCTPaktaSpec代码生成及预期header路径通过，未删运行/peer依赖。实际Xcode tvOS application/shared scheme生成、Ruby/Node语法及64段Bash、三份workflow actionlint通过，全部Apple Python19/19（含安装131核检查/3删源/10guard/2归零/2编译负控）通过。Mac全量结果须由新SHA远端run另证，不将本地生成成功记作平台编译成功。
+
+## 2026-11-15 4660a4b 第二轮真实结果
+
+安全验证SHA `4660a4b431afe850db63b5ee4aed0ed0a0ad0552` 的 Expo Release 两平台全部成功（run43615231410，iOS job132508709440/Android132508709229），实际Xcode已编译本轮Apple生产修复；同轮lint、C++、Apple源码与Android JNI/JVM通过。Foundation已越过编译但链接缺Status::Ok/Error，现由提取器现取真实工厂为独立TU并链接，Linux提取器9/9通过（其中1项实际独立链接Status工厂）；JS459pass/1fail是guard改holder后静态字符串未同步，已修为实际调用并本地专项12/12通过。tvOS实际编译全部SDK/React源后最终app链接缺RCTSwiftUI的swiftCompatibility56，生成器已加真实Swift宿主源及Swift5/运行库嵌入设置；这只修宿主Swift运行库接线，下一轮仍须最终链接通过。第二轮原始失败保留；Foundation下一轮真实Mac结果、tvOS/iOS设备、HAR验证及Android设备故障继续分别验收，不称矩阵完成。
+
+## 2026-11-15 Android 第二轮入口修复
+
+4660a4b 的四 ABI 构建、RN077 候选安装及旧架构 Release 编译已通过；core/debug 在进入 Gradle 前因 `spawnSync ./gradlew EACCES` 失败，RN077 在模拟器成功启动后因 action shell 从仓库根执行相对 `cd` 失败，尚未运行设备 suite。`run-gradle.js` 的 Unix 分支改由 sh 读取 wrapper，不依赖 Windows 检出丢失的执行位；三个 emulator action 的设备命令及 Metro 失败日志路径均显式使用 GITHUB_WORKSPACE。WSL 实际执行无执行位 wrapper，含空格 cwd、空格与 shell 特殊字面参数及原始退出码23均通过；YAML、三段action Bash语法及五条Detox命令保留校验通过，见 `TEMP/pakta-platform-validation-20261114/android-entry-fix-verification.json`。新的真实设备结果须由后续 run 另证。
+
+## 2026-11-15 Windows Harmony 临时 runner 入口
+
+Windows job只调度`self-hosted,Windows,X64,pakta-harmony-20261115`，普通upstream验证分支push不触发；Mac job仅处理手动非windows选择，专用push不进入Mac。runner启动环境必须显式提供RNU_HARMONY_SDK_TGZ、RNU_HARMONY_HAR_PATH、RNU_HARMONY_SIGNING_FILE、RNU_HARMONY_PROJECT=D:\r\hw1115、DEVECO_STUDIO_HOME、HDC_PATH/TARGET和Linux RNU_WSL_HDIFF_ROOT；完整候选b5ed与HAR ee0d摘要由job/脚本双固定。WSL CLI路径从实际source checkout转换，不借用主工作树CLI。
+
+job进程以`GIT_CONFIG_COUNT=1`、`GIT_CONFIG_KEY_0=core.autocrlf`、`GIT_CONFIG_VALUE_0=false`固定主树及递归子模块的LF字节，不写用户global。checkout v7源码核对未使用这三个indexed配置键，认证仍走其文件配置/HOME，独占本轮配置位不会覆盖checkout认证键；另验`GIT_CONFIG_PARAMETERS`及命令行配置继续生效。实际Windows Git在隔离global autocrlf=true夹具中递归clone，主树和子模块client.ts都与候选一致（226LF/0CRLF），global/认证include文件逐字节未改，见`TEMP/pakta-platform-validation-20261114/harmony-windows-git-lf-verification.json`。这是专用runner的固定配置，不承担合并任意预存indexed配置项的职责。
+
+PowerShell入口拒绝已有短工程、checkout内签名、非实体文件、错摘要或错checkout；PlanOnly完成只读验证才进入实跑。冻结依赖及codegen后复制公共Harmony工程，外部签名只进入该副本忽略的signing.local.json5；stage/sync/prepare/base/build/diff/check/install/test复用既有摘要与fullFallback=false门卫，日志/输入JSON仅从显式e2e路径上传，不上传短工程或签名。入口不会注册runner、推送或自行触发Actions；新的Windows实际run需另记设备结果。
+
+离线actionlint1.7.12（精确声明两个自托管label）、YAML/PowerShell AST、含空格隔离checkout的PlanOnly、四类输入拒绝及复制行为验证通过；codegen保留，依赖/构建/私有签名不随公共工程复制，已有目标目录拒绝，未创建实际D:\r\hw1115。证据`TEMP/pakta-platform-validation-20261114/harmony-windows-ci-offline.json`，不代称真实runner或设备运行。
+
+同轮iOS native最终1套/1项通过，core最终成功但非首遍全绿：首次bundle-hash通过，local-merge两项在launchApp的beforeEach超过300秒；Detox一次重试后两项通过，iOS跳过Android专属2项，完整job耗时57分钟。日志真实命令为maxWorkers2，覆盖Jest配置的1并使用两台模拟器；下一轮workflow显式maxWorkers1保持所有断言/套件/重试，只降低设备并行度，不把已观察的相关性称为已证明的根因。最终单worker稳定性仍需实际run。原始完整日志与成功/重试摘要保存TEMP/pakta-platform-validation-20261114，不以退出0抹去首遍失败。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

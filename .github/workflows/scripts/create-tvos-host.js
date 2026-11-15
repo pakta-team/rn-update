@@ -106,6 +106,8 @@ fs.mkdirSync(path.join(destination, 'ios'));
 fs.writeFileSync(path.join(destination, 'ios/Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
+<key>CFBundleShortVersionString</key><string>1.0.0</string>
+<key>CFBundleVersion</key><string>1</string>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
 </dict></plist>
 `);
@@ -167,8 +169,6 @@ target.build_configurations.each do |config|
     'GENERATE_INFOPLIST_FILE' => 'YES',
     'INFOPLIST_FILE' => 'Info.plist',
     'INFOPLIST_KEY_UILaunchScreen_Generation' => 'YES',
-    'INFOPLIST_KEY_CFBundleShortVersionString' => '1.0.0',
-    'INFOPLIST_KEY_CFBundleVersion' => '1',
     'TARGETED_DEVICE_FAMILY' => '3',
     'CLANG_ENABLE_MODULES' => 'YES',
     'CLANG_ENABLE_OBJC_ARC' => 'YES',

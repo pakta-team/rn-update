@@ -85,3 +85,8 @@ PowerShell入口拒绝已有短工程、checkout内签名、非实体文件、�
 新tvOS生成器改用RCTAppDelegate和RCTAppDependencyProvider，真实SDK bundleURL进入Hermes RN；JS只负责渲染、成功确认和冷启动探针，checkStrategy/updateStrategy均null。独立simctl驱动以当前CLI构建base/v1/v2，同epoch bytecode后注入内置包，服务端forceBoot驱动两版本与重启保持；随后只删除指定测试app的Library/Caches/rctpakta，证明defaults原字节保留、无更新时回内置包、重新下载及在线原生purgeRestore。新设备在finally中逐项回收，诊断/清理异常都写失败proof，最后核exe/base/PPK未变。iOS native leg在正常Detox后追加共享服务的真坏JS无forceBoot救援，独立证据always上传；Linux常驻Android8/iOS5/tvOS6门卫。
 
 本地tvOS宿主实体安装476包，同源守卫、RN-tvos0.85.3-3真实Metro/Hermes base PPK生成通过；tvOS六门卫在WSL Linux全过0skip，Windows因缺symlink权限的首轮1错误保留，不伪装跨平台通过。iOS五项、Android八项输入负控及变更workflow actionlint通过。以上新增场景尚待下一安全SHA实际Mac/simctl运行，不将编包或静态接线记作设备通过。
+
+
+## 2026-11-15 tvOS 独立回归输入
+
+1263真tvOS应用已完成Xcode链接、六门卫及base→v1原生GET/激活/健康确认/新PID保持；驱动在正常持久启动省略nil isFirstTime时KeyError，job132695473612失败，官方artifact14146162845保留，不记整套成功。本快照仅修三个tvOS夹具及地图：正常省略marker仍需原生健康状态，首次true仍必须accepted=true；Info.plist明确1.0.0/1，并新增app/JS/nativeConfig版本门卫。Linux七门卫及四个真实探针边界重放通过；v2/purge全链仍须本SHA真实执行。其余SDK/CLI/工作流逐字节沿1263，不混后续Expo生产Java或新Android/Harmony接线。

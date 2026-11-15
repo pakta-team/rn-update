@@ -26,11 +26,16 @@ class SafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             app = Path(directory)
             info = {"CFBundleIdentifier": module.BUNDLE_ID,
-                    "CFBundleExecutable": "PaktaTVValidation", "DTPlatformName": "appletvsimulator"}
+                    "CFBundleExecutable": "PaktaTVValidation", "DTPlatformName": "appletvsimulator",
+                    "CFBundleShortVersionString": "1.0.0", "CFBundleVersion": "1"}
             (app / "PaktaTVValidation").write_bytes(b"release")
             for key, wrong in [("CFBundleIdentifier", "space.other.app"),
-                               ("CFBundleExecutable", "Other"), ("DTPlatformName", "iphonesimulator")]:
-                (app / "Info.plist").write_bytes(plistlib.dumps({**info, key: wrong}))
+                               ("CFBundleExecutable", "Other"), ("DTPlatformName", "iphonesimulator"),
+                               ("CFBundleShortVersionString", None), ("CFBundleVersion", None)]:
+                changed = {**info, key: wrong}
+                if wrong is None:
+                    del changed[key]
+                (app / "Info.plist").write_bytes(plistlib.dumps(changed))
                 with self.assertRaisesRegex(ValueError, "dedicated tvOS"):
                     module.require_test_app(app)
             (app / "Info.plist").write_bytes(plistlib.dumps(info))
@@ -38,6 +43,16 @@ class SafetyTests(unittest.TestCase):
             (app / "PaktaTVValidation").unlink()
             with self.assertRaisesRegex(ValueError, "executable"):
                 module.require_test_app(app)
+
+    def test_first_launch_requires_ack_but_persisted_launch_may_omit_marker(self):
+        module.require_health_acknowledgement({"metadata": {}, "accepted": None})
+        module.require_health_acknowledgement({"metadata": {"isFirstTime": False}, "accepted": None})
+        module.require_health_acknowledgement({"metadata": {"isFirstTime": True}, "accepted": True})
+        for accepted in [False, None]:
+            with self.assertRaisesRegex(RuntimeError, "markSuccess"):
+                module.require_health_acknowledgement({"metadata": {"isFirstTime": True}, "accepted": accepted})
+        with self.assertRaisesRegex(ValueError, "marker type"):
+            module.require_health_acknowledgement({"metadata": {"isFirstTime": "false"}})
 
     def test_cache_is_exact_app_subdirectory(self):
         with tempfile.TemporaryDirectory() as directory:

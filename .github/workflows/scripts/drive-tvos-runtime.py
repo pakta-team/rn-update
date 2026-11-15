@@ -70,11 +70,22 @@ def require_test_app(app):
         info = plistlib.load(source)
     if (info.get("CFBundleIdentifier") != BUNDLE_ID or
             info.get("CFBundleExecutable") != "PaktaTVValidation" or
-            info.get("DTPlatformName") != "appletvsimulator"):
+            info.get("DTPlatformName") != "appletvsimulator" or
+            info.get("CFBundleShortVersionString") != "1.0.0" or
+            info.get("CFBundleVersion") != "1"):
         raise ValueError("Expected the dedicated tvOS simulator Release app")
     if not (app / "PaktaTVValidation").is_file():
         raise ValueError("Release executable is missing")
     return info
+
+
+def require_health_acknowledgement(probe):
+    # ---------- 原生正常持久启动会省略 nil marker；首次启动仍必须有 accepted=true ----------
+    marker = probe["metadata"].get("isFirstTime")
+    if marker is not None and type(marker) is not bool:
+        raise ValueError("Unexpected native first-launch marker type")
+    if marker is True and probe.get("accepted") is not True:
+        raise RuntimeError("The running first launch did not accept markSuccess")
 
 
 def safe_cache_directory(data):
@@ -234,7 +245,8 @@ class Driver:
             for item in observations:
                 if (item.get("version") != version or item.get("isTV") is not True or
                         item.get("dev") is not False or item.get("rendered") is not True or
-                        item.get("metadata", {}).get("currentVersion") != VERSIONS[version]):
+                        item.get("metadata", {}).get("currentVersion") != VERSIONS[version] or
+                        item.get("metadata", {}).get("packageVersion") != "1.0.0"):
                     raise ValueError("Actual tvOS RN JS identity differs from the expected launch")
                 if (Path(item["constants"]["downloadRootDir"]).resolve() !=
                         safe_cache_directory(self.data)):
@@ -246,8 +258,7 @@ class Driver:
         self.report["launches"][-1]["probe"] = observed
         self.simctl("io", self.udid, "screenshot", self.out / (label + ".png"))
         if version != "base":
-            if observed["metadata"]["isFirstTime"] and observed.get("accepted") is not True:
-                raise RuntimeError("The running first launch did not accept markSuccess")
+            require_health_acknowledgement(observed)
             wait("healthy native " + version, lambda: self.confirmed(version))
         self.snapshot(label)
         return observed
@@ -354,7 +365,8 @@ class Driver:
         self.data = Path(self.simctl("get_app_container", self.udid, BUNDLE_ID, "data"))
         self.launch("base", "base")
         config = wait("native config after JS sync", lambda: self.state()["nativeConfig"])
-        if (config.get("afterDownload") != "none" or config.get("endpoints") !=
+        if (config.get("afterDownload") != "none" or config.get("packageVersion") != "1.0.0" or
+                config.get("endpoints") !=
                 ["http://127.0.0.1:31338"]):
             raise RuntimeError("JS must leave activation to native forceBoot")
         for version in ["v1", "v2"]:
@@ -373,7 +385,7 @@ class Driver:
         state = self.state()
         if state["info"].get("currentVersion") or state["rollback"]:
             raise RuntimeError("Purged tvOS state did not forget missing versions cleanly")
-        if fallback["metadata"]["isFirstTime"]:
+        if fallback["metadata"].get("isFirstTime") is True:
             raise RuntimeError("Packaged fallback inherited update first-load state")
         stage = self.protocol.stage("v2", "force-redownload")
         self.launch("redownload-v2", "base")

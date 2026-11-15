@@ -15,6 +15,9 @@ harmony-e2e-sdk.js: 候选输入边界，stage在安装前将完整摘要候选�
 harmony-e2e-inputs.js: 只读 gzip/TAR 与 OHPM 复用门卫，完整 HAR 文件 SHA256、版本、当前短项目 file:../pakta.har 清单/锁和项目内物理 store 必须一致；拒绝额外/缺失/漂移文件、链接逃逸、TAR 路径别名和损坏，不写工程或静默安装。
 harmony-e2e-results.js: helper 与设备驱动共享的 HDC 安装回执门卫，接受传统成功句及 SDK26 路径回执与 AppMod finish 的完整组合，拒绝 unsuccessfully/Fail/Error；验收 Jest 两套当前工程结果和九项必需测试，拒绝空套件、过滤、跳过、缺失和错工程结果。
 harmony-e2e-results.test.js: HDC 传统/SDK26 真实回执、缺失完成行与失败混入、伪绿色汇总、缺失/跳过/重复用例及错工程 Jest 结果的持久负控。
+run-harmony-native-e2e.js: healthy/crash 独立短工程编排，复用构建/安装身份与固定完整结果门卫，原九项制品/结果不被覆盖，成功后归档实际HAP。
+harmony-native-results.js: 原生验收证据门卫，逐运行绑定真实请求/下载、非强制不激活、forced健康终态及同PID新JS fatal先于原生请求的证据。
+harmony-native-results.test.js: 陈旧runId/日志、错PID、缺下载、非强制误激活、错误终态和错套件等确定性正负控，不计作设备通过。
 hdc-sdk26-install-output.json: SDK26 真实安装 stdout 两行的 Base64 原字节夹具，保留成功句后的 ASCII 空格与 CRLF 且避免 Git 换行规范化，供共享结果门卫和 helper 安装证明回归使用。
 harmony-e2e.test.js: Node 持久正负控，覆盖候选/安装身份、RN 隔离、fallback、显式设备、清理边界、Release、严格 HAR 复用及完整测试证明；复用失败零命令，旧结果和测试中输入漂移不能生成成功证明，不冒充设备验收。
 harmony-e2e-map.md: 可供本机和临时 Windows runner 共用的分阶段命令、候选环境变量与证据边界，明确 prepare→base→build→diff 顺序及设备测试串行使用端口。
@@ -31,10 +34,19 @@ generate-platform-diffs-wsl.cjs: 显式 Android/Harmony 拓扑的真实差分生
 verify-update-artifacts.js: 复用 node-stream-zip 定位中央目录/流式解压，逐条校验 local/central/descriptor、大小、CRC、必需 bundle/patch/__diff.json 与清单形状；沿用 contract.json 归档预算，异步供生成器、独立子进程供同步复用门卫，不解包。
 verify-update-artifacts.test.js: TEMP 黄金 ZIP 正控及缺首53字节、目录偏移/尺寸、descriptor、CRC、必需条目、清单形状和解压预算负控；假生成器验证失败保留 fallback=true，不运行真实构建或设备。
 zip-artifact-fixtures.js: Python zipfile 冻结的极小 full/patch/deflate-descriptor/非法清单原字节，独立于待测 CLI 写入器，供 Node 门卫与编排回归共用。
-ios-rescue-server.ts: §11 iOS 救砖实验的状态化本地 HTTP 服务
+crash-rescue-server.js: Android/iOS 真坏 JS 共享 Node HTTP 服务；brick forceBoot，armed/无预下载证据后开放无 forceBoot fix，按阶段记录请求hash、制品HEAD/GET、摘要与封存证据，不伪造 crashRescue。
+crash-rescue-server.test.js: 离线 HTTP 状态机正负控，验证 fix 预下载封锁、阶段证据、无 forceBoot 修复及状态持久化，不冒充设备救援。
+crash-rescue-map.md: 两平台共享服务阶段、无 forceBoot/无预下载约束、独立 Hermes PPK 构建证明及 Android 驱动参数；明确离线准备不能替代设备 crashRescue 证据。
+drive-android-crash-rescue.py: 显式设备/样例 APK 和救援制品摘要守门后，以 ADB/UI 与 fatal 日志确认已 armed 的坏 JS、无 forceBoot 修复、原生 crashRescue=true 和重启保持；不点击 JS 检查或写 SDK 状态。
+android-crash-rescue.test.py: 临时APK/PPK与阻断ADB的记录器验证摘要、Hermes版本、旧证据/服务和制品身份门卫；仅离线边界，不计作设备救援。
+run-android-crash-rescue.js: 本机/CI单宿主编排入口，验证已有APK和可选制品证明，异步驱动Python时维持自有HTTP服务，最后核输入摘要并关闭服务；与iOS复用准备器/服务协议。
+ios-rescue-server.ts: §11 历史 iOS 救砖实验服务；当前分阶段跨平台验收使用 crash-rescue-server.js
+drive-ios-crash-rescue.py: 显式Release app/UDID和制品Hermes版本的simctl坏JS验收；只读确认已成功并armed的砖、同PID fatal、无预下载和无forceBoot的crashRescue提交与修复重启，不写原生状态
+ios-crash-rescue.test.py: iOS救援驱动的应用身份、完整Release/Hermes输入及当前PID崩溃报告负控，不替代设备执行
 load-compiled-e2e-hook.js: 加载 compile-node-ts 产物供 Jest global hook 转发
-local-e2e-server.ts: 提供本地版本、制品、控制与状态接口
+local-e2e-server.ts: 提供本地版本、制品、forceBoot控制及只读/state请求时间线，供独立原生套件确认无JS点击的真实检查/下载
 prepare-local-update-artifacts.ts: 以 v1 Hermes HBC 为 epoch 生成 full/diff/ppk/v2-track 本地更新制品；显式 RNU_E2E_BUNDLER=expo 复用 Expo export:embed，Harmony 保持独立路径
+prepare-crash-rescue-artifacts.js: 显式宿主/CLI/平台编译独立 brick/fix Hermes full PPK，复用 RN/Expo 正常入口；保留入口与产物摘要、逐包构建日志，不重建 APK 或混用 HBC 版本
 refresh-ios-app-bundle.sh: 复用缓存原生包并刷新当前 JS bundle/assets
 run-prepare-local-update-artifacts.js: Node 转发入口，调用 TS 制品准备脚本
 run-gradle.js: Windows 调用批处理、Unix 用 sh 读取 Android Gradle wrapper，保留参数/退出码并消除跨系统检出执行位对 npm/Detox 的影响

@@ -9,11 +9,11 @@ ci-failure-email.yml: 常规分支失败 run 的 issue 通知与恢复关闭；c
 cli.yml: master/main/codex验证分支 push 与 CLI 相关 PR 执行静态/单测、精确 Node 18.17 smoke、固定四组 Hermes 编译器与夹具 Hash 验证及 seeded fuzz；接线不代表远端已通过
 e2e_android.yml: 先重建四 ABI SO 并发布 SHA256SUMS，设备矩阵下载校验同轮产物；RN077 以同轮 SO/声明生成显式 tgz并由构建前后守卫绑定旧架构；emulator action 的独立 shell 以绝对 workspace 路径定位宿主，不依赖 run 默认目录
 e2e_harmony.yml: 保留Mac手动构建/设备链；Windows仅精确codex/verify-harmony-win-20261115 push或显式dispatch windows，唯一runner label、source隔离checkout和全新D:\r\hw1115，固定4818最终GEB候选/92bb HAR后跑双ABI Release、WSL真差分与完整设备suite
-e2e_ios.yml: iOS 模拟器 core/native 两组更新链路，显式单worker且保留一次重试；CLI输入触发，受信main/master core才写每日内容缓存；app保留原生精确key，命中后显式bash读644刷新脚本
+e2e_ios.yml: iOS core/native两组单worker更新链；native在Detox释放服务后追加真实坏JS崩溃救援、独立同epoch Hermes PPK、无forceBoot修复和always证据；受信main/master core才写每日内容缓存，app原生精确key不变
 expo_build.yml: Expo57/RN0.86.3 Android/iOS Release 源码消费编译；隔离本地 SDK 并断言依赖归宿主，prebuild 后编译 Kotlin/Swift/共享核，Apple 显式确认 Expo subspec、bundleURL flag 与 Delegate 注册；不代表设备更新或发布候选
 lint.yml: master/main 的 PR/push 与 codex验证分支 push 执行 SDK Biome、TypeScript、Harmony 声明和 Native Spec 一致性检查
 publish.yml: 四ABI重建后、上传前以Node24执行禁串/Android verifier正负控；同步Release版本后重建分支显式release构建HAR、校验并以--har执行BuildProfile及新增禁串专项；两分支release:prepare各仅pack一次，同一tgz清单/声明消费后发布前核对SHA-256，保留OIDC/contents与provenance/public/beta权限；复用HAR仍显式校验前版版本，不硬套当前版本专项
-test.yml: master/main的PR/push与codex验证分支push递归检出；Android真实JNI/JVM、同轮ReleaseHAR→包消费、共享核/Apple源码/原始ObjC++语法及MacFoundation分层；独立macos-26以RN-tvos0.85.3-3实体消费当前SDK，CocoaPods后Release编译并最终链接tvOS应用，检查RCTPakta符号/Network，不以Podspec测试代替平台编译
+test.yml: 递归检出后分层执行JNI/JVM、同轮HAR→包消费、共享核/Apple源码/Foundation；Linux常驻Android/iOS/tvOS驱动负控；macos-26固定RN-tvos0.85.3-3真RCTAppDelegate/Release链接后，执行真实JS/原生forceBoot双版本/缓存清理回包与在线purgeRestore，always保存运行证据
 scripts/: CI 使用的 emulator、Firebase、callable function 与隔离 tvOS 原生应用生成夹具
 
 本地2026-11-14强制Gradle执行51项真实安装JNI与46项JVM，均通过；Release HAR重建后真实正负控5/5、0 skip，package门禁Node17/17与HAR5/5通过。旧本地HAR因源码漂移确实失败，验证后恢复原HAR与BuildProfile/版本源文件；干净CI必须先构建并取artifact，不假定忽略产物存在。历史prepack/tgz结论及本轮摘要见 ../../rn-update/scripts/CLAUDE.md；Actions未实跑，不等同设备或发布候选验收，未发布，原permissions不变。
@@ -77,3 +77,11 @@ PowerShell入口拒绝已有短工程、checkout内签名、非实体文件、�
 同轮iOS native最终1套/1项通过，core最终成功但非首遍全绿：首次bundle-hash通过，local-merge两项在launchApp的beforeEach超过300秒；Detox一次重试后两项通过，iOS跳过Android专属2项，完整job耗时57分钟。日志真实命令为maxWorkers2，覆盖Jest配置的1并使用两台模拟器；下一轮workflow显式maxWorkers1保持所有断言/套件/重试，只降低设备并行度，不把已观察的相关性称为已证明的根因。最终单worker稳定性仍需实际run。原始完整日志与成功/重试摘要保存TEMP/pakta-platform-validation-20261114，不以退出0抹去首遍失败。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
+## 2026-11-15 第四轮与 Apple 运行场景接线
+
+冻结937b08baab7f的七workflow共25个实际执行job通过，Harmony Mac条件skip。Harmony首轮job132556969592在Git schannel检出阶段失败，未构建/触设备；同SHA以仅runner进程OpenSSL/HTTP1.1且保留TLS验证重试，job132559594499完整新工程双ABI/CLI差分/两套九项37.641秒通过。一次性runner22自行移除；原失败、retry日志、官方artifact14128697554及候选4818/HAR92bb/HAP28957输入证明均保留，不覆盖本机较早HAP。iOS core单次两套3pass/Android-only2skip，native单次1pass；完整package已越过Ruby入口并成功。这轮tvOS仍只有编译/链接，不含下面新增运行场景。
+
+新tvOS生成器改用RCTAppDelegate和RCTAppDependencyProvider，真实SDK bundleURL进入Hermes RN；JS只负责渲染、成功确认和冷启动探针，checkStrategy/updateStrategy均null。独立simctl驱动以当前CLI构建base/v1/v2，同epoch bytecode后注入内置包，服务端forceBoot驱动两版本与重启保持；随后只删除指定测试app的Library/Caches/rctpakta，证明defaults原字节保留、无更新时回内置包、重新下载及在线原生purgeRestore。新设备在finally中逐项回收，诊断/清理异常都写失败proof，最后核exe/base/PPK未变。iOS native leg在正常Detox后追加共享服务的真坏JS无forceBoot救援，独立证据always上传；Linux常驻Android8/iOS5/tvOS6门卫。
+
+本地tvOS宿主实体安装476包，同源守卫、RN-tvos0.85.3-3真实Metro/Hermes base PPK生成通过；tvOS六门卫在WSL Linux全过0skip，Windows因缺symlink权限的首轮1错误保留，不伪装跨平台通过。iOS五项、Android八项输入负控及变更workflow actionlint通过。以上新增场景尚待下一安全SHA实际Mac/simctl运行，不将编包或静态接线记作设备通过。

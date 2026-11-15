@@ -28,6 +28,8 @@ E2E_PLATFORM=android detox test --configuration android.emu.release --headless -
 
 `RNU_RN077_OLDARCH_ROOT` 可把生成工作区放在仓库外 TEMP；已有 AwesomeProject 会拒绝覆盖。`RNU_SDK_SHA256` 可绑定预期摘要。生成器把 tgz 复制到工程内，Metro 与 RN CLI 均消费 `node_modules/rn-update`，不借用仓库源码；安装前置检查和 `npm run apk` 的 Release 后置检查分别验证候选字节及宿主/SDK BuildConfig。启动入口另断言真实旧桥，不能仅凭 gradle.properties 判定架构。
 
+真坏JS救援使用[独立入口](scripts/crash-rescue-map.md)，复用明确的Release APK/.app并为每个宿主编译匹配的Hermes PPK。Android的`run-android-crash-rescue.js`串行管理制品、临时服务、设备驱动和证据；iOS使用`drive-ios-crash-rescue.py`。两者都要求已确认坏版本真实fatal、fix此前不可下载且不含forceBoot、原生`crashRescue:true`和修复后重启保持；健康JS的native-check不能替代。离线门卫分别由`python -B scripts/android-crash-rescue.test.py`、`python -B scripts/ios-crash-rescue.test.py`验证，设备结果另行登记。
+
 持久离线回归：`npm run test:rn077-generator`。真实验证与未验范围见 [RN077 地图](scripts/rn077-oldarch-map.md)；这里提供 Detox 命令不代表该矩阵已经通过。
 
 Android 的 package diff 走 `PackageInstaller`，宿主清单声明

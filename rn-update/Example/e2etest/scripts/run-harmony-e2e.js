@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * [INPUT]: 依赖显式候选 tgz/HAR 摘要、依赖/ZIP/结果门卫、DevEco、Harmony 工程、hdc 目标与既有 prepare/WSL/Jest 入口
- * [OUTPUT]: 提供分阶段 Harmony 命令、真实差分门禁及候选/HAR/base/HAP/设备身份与全套通过证明
+ * [OUTPUT]: 提供分阶段 Harmony 命令、真实差分门禁及候选/HAR/base/HAP/设备身份与通过证明；独立原生 runner 复用隔离上下文
  * [POS]: e2etest 跨平台 Harmony 编排层；物理隔离候选避免根 RN 污染，构建与设备入口共用，不持有签名或实现更新逻辑
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -58,7 +58,9 @@ function context(env = process.env, overrides = {}) {
     project: path.resolve(
       env.RNU_HARMONY_PROJECT || path.join(appRoot, 'harmony')
     ),
-    artifacts: path.join(e2eRoot, '.e2e-artifacts', 'harmony'),
+    artifacts:
+      overrides.artifacts || path.join(e2eRoot, '.e2e-artifacts', 'harmony'),
+    bundleEntry: overrides.bundleEntry || 'e2e/entry.base.ts',
     installedSdk: path.join(appRoot, 'node_modules', 'rn-update'),
     har: path.resolve(
       env.RNU_HARMONY_HAR_PATH || path.join(sdkRoot, 'harmony', 'pakta.har')
@@ -160,6 +162,10 @@ function assertProject(ctx) {
 }
 
 function base(ctx) {
+  if (
+    !['e2e/entry.base.ts', 'e2e/entry.crashprobe.ts'].includes(ctx.bundleEntry)
+  )
+    throw new Error('Unknown Harmony validation bundle entry');
   syncSdk(ctx);
   assertArtifacts(ctx, false);
   assertProject(ctx);
@@ -169,18 +175,11 @@ function base(ctx) {
   );
   ctx.run(
     process.execPath,
-    [
-      cli,
-      'bundle-harmony',
-      '--dev',
-      'false',
-      '--entry-file',
-      'e2e/entry.base.ts',
-    ],
+    [cli, 'bundle-harmony', '--dev', 'false', '--entry-file', ctx.bundleEntry],
     {
       cwd: ctx.appRoot,
       env: ctx.env,
-      label: 'Bundle BINARY_BASE after artifact preparation',
+      label: `Bundle ${ctx.bundleEntry} after artifact preparation`,
     }
   );
   const rawfile = path.join(
@@ -394,6 +393,14 @@ function buildInputs(ctx) {
   ]);
   return {
     project: fs.realpathSync(ctx.project),
+    ...(ctx.bundleEntry !== 'e2e/entry.base.ts'
+      ? {
+          fixtureBundleEntry: ctx.bundleEntry,
+          fixtureEntrySha256: hash(
+            requireFile(path.join(ctx.appRoot, ctx.bundleEntry))
+          ),
+        }
+      : {}),
     candidateSha256: assertDigest(
       ctx.env.RNU_HARMONY_SDK_TGZ,
       ctx.env.RNU_HARMONY_SDK_SHA256,
@@ -568,7 +575,7 @@ function check(ctx) {
   };
 }
 
-function testDevice(ctx) {
+function testDevice(ctx, options = {}) {
   const target = deviceArgs(ctx);
   const report = check(ctx);
   const installed = JSON.parse(
@@ -599,7 +606,7 @@ function testDevice(ctx) {
     [
       require.resolve('jest/bin/jest', { paths: [ctx.e2eRoot] }),
       '--config',
-      'e2e/harmony.jest.config.js',
+      options.jestConfig || 'e2e/harmony.jest.config.js',
       '--runInBand',
       '--json',
       '--outputFile',
@@ -613,11 +620,15 @@ function testDevice(ctx) {
         HDC_TARGET: target[1],
         RNU_E2E_SKIP_PREPARE: 'true',
         RNU_E2E_FULL_FALLBACK: 'false',
+        ...options.env,
       },
       label: 'Run Harmony device E2E with real diff gate',
     }
   );
-  const passed = assertHarmonyTestResults(results, ctx.e2eRoot);
+  const passed = (options.assertResults || assertHarmonyTestResults)(
+    results,
+    ctx.e2eRoot
+  );
   if (JSON.stringify(check(ctx)) !== JSON.stringify(report))
     throw new Error('Harmony inputs changed during the full suite');
   fs.writeFileSync(
@@ -677,6 +688,8 @@ module.exports = {
   assertArtifacts,
   deviceArgs,
   removeGeneratedDependencies,
+  check,
+  testDevice,
 };
 if (require.main === module) {
   try {

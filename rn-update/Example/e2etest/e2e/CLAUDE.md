@@ -12,6 +12,7 @@ bundle-hash.test.ts: 读取 iOS 缓存或 Android 原生桥诊断，以跨平台
 detox-hooks.d.ts: Detox globalSetup/globalTeardown 的环境声明
 entry.brick.ts: §11 救砖实验的故障 bundle 入口，故意在启动后触发崩溃
 entry.fix.ts: §11 救砖实验的修复 bundle 入口，解除故障标记后加载应用
+entry.rescue-fix.ts: 复用 entry.fix，读取真实原生 hashInfo 并输出 crashRescue 证明；仅供当前 Android/iOS 真坏 JS 验收，不在 JS 写入救援标记
 entry.v1.ts: 本地 full 更新基线 bundle 入口
 entry.v2.ts: 本地 ppk diff 更新 bundle 入口
 entry.v3.ts: 本地 package diff 更新 bundle 入口
@@ -21,7 +22,9 @@ globalSetup.ts: 生成本地制品、启动更新服务并委托 Detox 全局准
 globalTeardown.js: 编译并转发 globalTeardown.ts，供 Detox runner 调用
 globalTeardown.ts: 停止本地更新服务并委托 Detox 全局清理
 harmony.jest.config.js: HarmonyOS hdc/uitest 套件的独立 Jest runner
+harmony-native.jest.config.js: Harmony 原生 forceBoot/失败 JS 的独立单套 runner，不混入原九项
 harmony/: HarmonyOS 更新流与 smoke 测试
+harmony-native/: 显式隔离 HAP 的 healthy/crash 验收，关联服务器实际请求、存活 PID、故障日志与健康重启
 harness/: HarmonyOS 设备 UI 驱动和布局解析适配
 jest.config.js: 常规 Detox 本地更新 runner，排除独立平台套件
 local-merge.test.ts: Android/iOS full、ppk、package 与以 Hermes v1 为基线的 v2-track 串行更新验收

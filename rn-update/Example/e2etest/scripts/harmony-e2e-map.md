@@ -69,6 +69,22 @@ npm run harmony:e2e -- diff
 
 ## 验证与证据边界
 
+### 独立原生与失败 JS 设备验收
+
+原九项仍由 `harmony:e2e test` 完整执行。`harmony:native` 另用显式 `RNU_HARMONY_NATIVE_PROJECT` 短工程，必须与原 `RNU_HARMONY_PROJECT` 和源码工程不同；调用方准备该副本与签名，入口不会复制证书或自动创建工程。两种原生验收各保留 `.e2e-artifacts/harmony-native/<healthy|crash>` 的构建/安装/Jest/轨迹/HAP，禁止覆盖或借用原九项结果。
+
+```powershell
+$env:RNU_HARMONY_NATIVE_PROJECT = 'D:\harmony-native-short'
+npm run harmony:native -- healthy all
+npm run harmony:native -- crash all
+```
+
+两种模式都先 `init` 复制并绑定已验真的五制品及 manifest，再 `base → build → install → test`；可按相同阶段单独重试，`check` 只做身份检查。healthy 使用正常 base，crash 使用已有 `entry.crashprobe.ts`，在原生五秒调度前抛出一秒 JS fatal。构建仍消费相同显式候选/HAR与双 ABI Release，故障入口源码及已编译基座摘要写入独立构建证明。入口同时检查基座实际字节中的故障 marker，拒绝未重新 bundle 的错用例 HAP。
+
+独立测试不点击 JS 更新按钮、不写 KV。每个模式先从仅清理测试应用数据的状态证明 forceBoot=false 的真实原生检查/下载不激活，随后再次清理测试应用，证明 forceBoot=true 的全新检查/下载可激活并正常 markSuccess、重启保持。crash 还必须取得当前存活 PID 的新 fatal 原始 hilog，日志须先于服务端原生请求，且下载后仍为同一 PID；缺 marker、旧 PID/旧日志、缺下载或仅有标签均失败。`local-e2e-server.ts` 的只读 `/state` 给出检查与 GET 制品请求时间，服务夹具和独立副本须在运行前后全部摘要一致。
+
+`harmony-native-validation.json` 只在固定单套 Jest 全通过、当前 runId 轨迹通过、输入未变且实际 HAP 已独立归档后生成。它与原九项的证明分别登记；Node 证据门卫正负控不能代替这两次真实设备运行。
+
 `npm run test:harmony-orchestrator` 跑编排、结果与 ZIP 三组持久 Node 正负控；新增缺首53字节、local/central/descriptor/CRC、必需条目、清单形状、解压预算和旧 false 重生失败负控。复用坏 ZIP 与坏 HAR 均须零设备命令拒绝。Windows runner 在冻结安装样例依赖后先执行本命令；测试不调用真实 Hvigor、模拟器或设备，不冒充平台通过。
 
 设备套件使用本地 `31337` 端口，与 Android 本地 E2E 必须顺序运行；构建阶段可以并行。业务六项逐阶段校验 current-hash、lastError 和原生 getUpdateMetadata().rolledBackVersion，重启后仍要求 v4/hash 一致且无错误/回滚。增加观测 UI 后须重新 prepare→base→build→diff；旧 HAP 缺字段应失败。实际通过仍需记录候选/HAR 摘要、构建日志、`check`、设备目标、Jest JSON 与成功证明。现有 `LOCAL_WINDOWS_TEST.md` 保留机器路径手册，本文记录共用入口。

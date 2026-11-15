@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖当前 checkout SDK 源码和明确的空输出目录；生成宿主固定 RN-tvos/React/CLI 版本
- * [OUTPUT]: 提供独立 tvOS 原生应用、Podfile、Xcode 工程生成器与依赖/源码同源断言
- * [POS]: CI 的真实 tvOS 编译夹具；物理隔离 SDK 以消费宿主 RN，不生成更新策略或发布候选
+ * [OUTPUT]: 提供独立 tvOS RN 应用、base/v1/v2 运行探针、Podfile/Xcode 工程与依赖/源码同源断言
+ * [POS]: CI 的真实 tvOS 消费端；物理隔离 SDK，运行时只确认健康，不由 JS 检查、下载或激活更新
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 const assert = require('node:assert/strict');
@@ -38,30 +38,104 @@ fs.writeFileSync(path.join(destination, 'package.json'), JSON.stringify({
   devDependencies: {
     '@react-native-community/cli': '20.1.0',
     '@react-native-community/cli-platform-ios': '20.1.0',
+    '@react-native/babel-preset': '0.85.3',
+    '@react-native/metro-config': '0.85.3',
   },
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(destination, 'index.js'), "// Native compilation host; no JS bundle is executed.\n");
+for (const version of ['base', 'v1', 'v2']) {
+  fs.writeFileSync(path.join(destination, version === 'base' ? 'index.js' : `entry.${version}.js`),
+    `/**
+ * [INPUT]: 依赖 runtime 的真实 RN 注册与健康探针
+ * [OUTPUT]: 注册 ${version} 标记的 tvOS 应用
+ * [POS]: 隔离更新制品的唯一版本差异，不改变更新策略
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+require('./runtime').register('${version}');\n`);
+}
+fs.writeFileSync(path.join(destination, 'babel.config.js'),
+  "module.exports = {presets: ['module:@react-native/babel-preset']};\n");
+fs.writeFileSync(path.join(destination, 'metro.config.js'),
+  "const {getDefaultConfig} = require('@react-native/metro-config');\nmodule.exports = {...getDefaultConfig(__dirname), maxWorkers: 1};\n");
+fs.writeFileSync(path.join(destination, 'runtime.js'), `/**
+ * [INPUT]: 依赖真实 React/RN、SDK 公共门面与宿主传入的本次冷启动标识
+ * [OUTPUT]: 渲染版本标记并报告真实桥/JS 身份与 markSuccess 结果
+ * [POS]: tvOS 运行证明；JS 不检查、不下载、不切换，只把健康结果交回原生
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+const React = require('react');
+const {AppRegistry, Platform, Text, View} = require('react-native');
+const {Pakta, PaktaModule, getUpdateMetadata} = require('rn-update');
+const endpoint = 'http://127.0.0.1:31338';
+const client = new Pakta({
+  appKey: 'tvos-runtime-validation', server: {main: [endpoint], queryUrls: []},
+  checkStrategy: null, updateStrategy: null, autoMarkSuccess: false,
+  disableTelemetry: true, disableErrorReporting: true,
+});
+async function sendProbe(version, launchId, accepted) {
+  await fetch(endpoint + '/probe', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({version, launchId, accepted, rendered: true,
+      isTV: Platform.isTV, dev: __DEV__, metadata: getUpdateMetadata(),
+      constants: PaktaModule.getConstants()}),
+  });
+}
+exports.register = (version) => {
+  function App({launchId}) {
+    React.useEffect(() => {
+      let interval;
+      const timer = setTimeout(async () => {
+        const metadata = getUpdateMetadata();
+        const accepted = metadata.currentVersion && metadata.isFirstTime
+          ? await client.markSuccess() : null;
+        const report = () => sendProbe(version, launchId, accepted)
+          .catch((error) => console.error('TV_RUNTIME_PROBE', String(error)));
+        await report();
+        interval = setInterval(report, 1000);
+      }, 1500);
+      return () => {clearTimeout(timer); clearInterval(interval);};
+    }, [launchId]);
+    return React.createElement(View, {style: {flex: 1, backgroundColor: '#102030',
+      alignItems: 'center', justifyContent: 'center'}},
+      React.createElement(Text, {style: {color: '#fff', fontSize: 48}},
+        'Pakta tvOS ' + version));
+  }
+  AppRegistry.registerComponent('PaktaTVValidation', () => App);
+};
+`);
 fs.mkdirSync(path.join(destination, 'ios'));
+fs.writeFileSync(path.join(destination, 'ios/Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
+</dict></plist>
+`);
 // RN0.85 的 RCTSwiftUI 含 Swift 静态对象；宿主 Swift 编译负责链接兼容运行库。
 fs.writeFileSync(path.join(destination, 'ios/SwiftRuntime.swift'), `import Foundation
 @objc(PaktaTVSwiftRuntime)
 final class PaktaTVSwiftRuntime: NSObject {}
 `);
-fs.writeFileSync(path.join(destination, 'ios/main.mm'), `#import <UIKit/UIKit.h>
+fs.writeFileSync(path.join(destination, 'ios/main.mm'), `/**
+ * [INPUT]: 依赖 RCTAppDelegate、生成的依赖提供者与 RCTPakta bundle 选择入口
+ * [OUTPUT]: 启动真实 RN 根视图，并把进程冷启动标识传入 JS 探针
+ * [POS]: tvOS 测试宿主；版本选择完全由 SDK 原生生命周期拥有
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+#import <UIKit/UIKit.h>
+#import <RCTAppDelegate.h>
+#import <ReactAppDependencyProvider/RCTAppDependencyProvider.h>
 #import "RCTPakta.h"
 
-@interface PaktaTVAppDelegate : UIResponder <UIApplicationDelegate>
-@property (nonatomic, strong) UIWindow *window;
+@interface PaktaTVAppDelegate : RCTAppDelegate
 @end
 @implementation PaktaTVAppDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
-    // 强引用原生模块，使最终应用链接验证 SDK 而非只生成静态库。
-    Class module = [RCTPakta class];
-    NSCAssert(module != Nil, @"Pakta module must be linked");
-    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-    self.window.rootViewController = [UIViewController new];
-    [self.window makeKeyAndVisible];
-    return YES;
+    self.moduleName = @"PaktaTVValidation";
+    self.dependencyProvider = [RCTAppDependencyProvider new];
+    self.initialProps = @{@"launchId": NSProcessInfo.processInfo.environment[@"PAKTA_TV_LAUNCH_ID"] ?: @"missing"};
+    return [super application:application didFinishLaunchingWithOptions:options];
+}
+- (NSURL *)bundleURL {
+    return [RCTPakta bundleURL];
 }
 @end
 int main(int argc, char *argv[]) {
@@ -91,7 +165,10 @@ target.build_configurations.each do |config|
   config.build_settings.merge!({
     'PRODUCT_BUNDLE_IDENTIFIER' => 'space.yoghourt.pakta.tvvalidation',
     'GENERATE_INFOPLIST_FILE' => 'YES',
+    'INFOPLIST_FILE' => 'Info.plist',
     'INFOPLIST_KEY_UILaunchScreen_Generation' => 'YES',
+    'INFOPLIST_KEY_CFBundleShortVersionString' => '1.0.0',
+    'INFOPLIST_KEY_CFBundleVersion' => '1',
     'TARGETED_DEVICE_FAMILY' => '3',
     'CLANG_ENABLE_MODULES' => 'YES',
     'CLANG_ENABLE_OBJC_ARC' => 'YES',

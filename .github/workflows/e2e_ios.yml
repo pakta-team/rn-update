@@ -1,5 +1,5 @@
 # [INPUT]: 依赖 SDK/CLI 当前源码、原生依赖及本地内容缓存 action
-# [OUTPUT]: 对外提供 iOS core/native 两组 Release 更新链路 CI 检查
+# [OUTPUT]: 提供 iOS core/native Release 链路及 native leg 的真实坏 JS/Hermes 救援检查
 # [POS]: Apple 宿主集成门禁；内容缓存不作为已编译 app 或当前源码有效性的证明
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 name: e2e-ios
@@ -239,4 +239,29 @@ jobs:
           name: e2e-ios-detox-artifacts-${{ matrix.suite }}
           path: rn-update/Example/e2etest/artifacts
           if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Prove real bad-JS crash rescue without forceBoot
+        if: matrix.suite == 'native'
+        working-directory: rn-update/Example/e2etest
+        run: |
+          set -euo pipefail
+          python3 scripts/ios-crash-rescue.test.py
+          if lsof -nP -iTCP:31337 -sTCP:LISTEN; then
+            echo 'Detox server did not release the rescue port' >&2
+            exit 1
+          fi
+          python3 scripts/drive-ios-crash-rescue.py \
+            --app ios/build/Build/Products/Release-iphonesimulator/AwesomeProject.app \
+            --udid "$(node scripts/detect-ios-simulator-type.js --udid)" \
+            --cli-root "$GITHUB_WORKSPACE/rn-update-cli" \
+            --output ".e2e-artifacts/ios-crash-rescue-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Preserve iOS crash-rescue evidence
+        if: always() && matrix.suite == 'native'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-crash-rescue-evidence
+          path: rn-update/Example/e2etest/.e2e-artifacts/ios-crash-rescue-*
+          if-no-files-found: warn
           retention-days: 7

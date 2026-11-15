@@ -1,5 +1,5 @@
 # [INPUT]: 依赖 monorepo SDK 源码、共享核、Android/Harmony/Apple 工具链与候选校验脚本
-# [OUTPUT]: 提供 JS/JVM/JNI/C++/HAR/包消费、Apple 源码与真正 tvOS 应用编译/链接门禁
+# [OUTPUT]: 提供 JS/JVM/JNI/C++/HAR/包消费、Apple 源码与 tvOS 真 RN/OTA/缓存恢复门禁
 # [POS]: 多平台验证编排；验证分支 push 可直接执行，不借用默认分支旧结果
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 name: test
@@ -214,6 +214,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang
       - name: Run all Apple Python tests
         run: python3 -B -m unittest discover -s scripts/tests/ios-purge-restore -p 'test_*.py' -v
+      - name: Verify device-driver input and failure-evidence guards
+        run: |
+          python3 -B Example/e2etest/scripts/android-crash-rescue.test.py
+          python3 -B Example/e2etest/scripts/ios-crash-rescue.test.py
+          python3 -B ../.github/workflows/scripts/test-tvos-runtime.py
 
   ios-purge-restore-test:
     name: Native purge-restore ordering
@@ -228,7 +233,7 @@ jobs:
         run: SANITIZE=1 VERIFY_REGRESSIONS=1 bash scripts/test-ios-purge-restore.sh
 
   tvos-build:
-    name: tvOS native Release compile and application link
+    name: tvOS Release RN runtime, OTA and cache recovery
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -255,6 +260,9 @@ jobs:
         run: |
           bun install
           node assert-host.js
+      - name: Install the current CLI for real tvOS OTA artifacts
+        working-directory: rn-update-cli
+        run: bun install --frozen-lockfile && bun run build
       - name: Generate the tvOS application and install CocoaPods
         working-directory: ${{ runner.temp }}/pakta-tvos-host/ios
         run: |
@@ -277,6 +285,14 @@ jobs:
           grep -F 'OBJC_CLASS_$_RCTPakta' ../linked-symbols.txt
           xcrun otool -L "$app/PaktaTVValidation" > ../linked-frameworks.txt
           grep -F '/Network.framework/' ../linked-frameworks.txt
+      - name: Verify tvOS driver safety boundaries
+        run: python3 ../.github/workflows/scripts/test-tvos-runtime.py
+      - name: Execute real tvOS RN OTA and purge recovery
+        run: |
+          python3 ../.github/workflows/scripts/drive-tvos-runtime.py \
+            --host "$RUNNER_TEMP/pakta-tvos-host" \
+            --cli-root "$GITHUB_WORKSPACE/rn-update-cli" \
+            --output "$RUNNER_TEMP/pakta-tvos-host/runtime-evidence"
       - name: Preserve tvOS build evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -287,5 +303,6 @@ jobs:
             ${{ runner.temp }}/pakta-tvos-host/linked-*.txt
             ${{ runner.temp }}/pakta-tvos-host/ios/Podfile.lock
             ${{ runner.temp }}/pakta-tvos-host/bun.lock
+            ${{ runner.temp }}/pakta-tvos-host/runtime-evidence
           if-no-files-found: warn
           retention-days: 7

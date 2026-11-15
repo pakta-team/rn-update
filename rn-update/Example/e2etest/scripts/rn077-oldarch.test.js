@@ -93,6 +93,12 @@ test('TEMP generation consumes one local tarball and rewrites both resolvers', (
     assert(!read(config).includes("path.resolve(__dirname, '../..')"));
   }
   assert(read('index.js').startsWith('import { assertOldArchitecture }'));
+  const coreConfig = require(path.join(root, 'e2e/jest.config.js'));
+  assert(coreConfig.testPathIgnorePatterns.includes('/e2e/harmony-native/'));
+  assert.deepEqual(
+    require(path.join(root, 'e2e/harmony-native.jest.config.js')).testMatch,
+    ['<rootDir>/e2e/harmony-native/native-check.test.ts']
+  );
   assert.match(read('android/gradle.properties'), /newArchEnabled=false/);
   assert.match(
     read('android/app/src/main/java/com/awesomeproject/MainApplication.kt'),

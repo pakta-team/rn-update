@@ -3,7 +3,7 @@
 
 ## 输入与职责
 
-此入口验证 Expo57/RN0.86.3 的正常 ExpoReactHostFactory，而不是通过预置 bundle 或 SharedPreferences 注入模拟选包。复用主 E2E UI、版本常量、制品准备器、WSL 差分器与本地服务；`drive-expo-update-ui.py` 在清理测试应用前验证候选 SHA-256、物理安装目录与全部归档文件字节。
+此入口验证 Expo57/RN0.86.3 的正常 ExpoReactHostFactory。`create-expo-e2e-project.js` 只创建 fresh 工程，复用主 E2E UI、版本/坏 JS 入口与本地服务，保存 `expo-e2e-project.json` 的候选和源码摘要。安装、prebuild、Gradle 各自显式执行；`assert-expo-e2e-project.js` 在构建前核对完整候选、依赖单源及原生网络边界，`drive-expo-update-ui.py` 在清理测试应用前再次验证候选全部文件。
 
 要求 Node22、npm、Bun、Python3.10+、Android SDK/API36、JDK21；Windows 真差分另需 WSL/Node/C++ 与 Linux node-hdiffpatch。显式选择已启动设备，`adb devices -l` 必须显示 device。工作目录应短且不存在，不复制裁剪过的 node_modules；依赖必须正常完整安装，并保存本轮 package-lock。
 
@@ -18,59 +18,23 @@ $Candidate = $env:RNU_SDK_TARBALL
 $CandidateSha = $env:RNU_SDK_SHA256
 if ((Get-FileHash -LiteralPath $Candidate -Algorithm SHA256).Hash.ToLower() -ne $CandidateSha) { throw 'candidate mismatch' }
 $ExpoHost = Join-Path $env:TEMP 'pakta-expo-ota-clean'
-if (Test-Path -LiteralPath $ExpoHost) { throw 'choose a fresh host directory' }
-New-Item -ItemType Directory -Path $ExpoHost | Out-Null
-Copy-Item -LiteralPath $Candidate -Destination (Join-Path $ExpoHost 'rn-update-candidate.tgz')
-@'
-{"name":"pakta-expo-ota-probe","version":"1.0.0","private":true,"main":"index.js","dependencies":{"expo":"57.0.22","react":"19.2.3","react-native":"0.86.3","rn-update":"file:./rn-update-candidate.tgz"}}
-'@ | Set-Content -LiteralPath (Join-Path $ExpoHost 'package.json') -Encoding utf8NoBOM
-@'
-{"expo":{"name":"PaktaExpoProbe","slug":"pakta-expo-probe","version":"1.0.0","android":{"package":"space.yoghourt.pakta.expoprobe"},"plugins":[["rn-update",{"channel":"expo-host-probe"}]]}}
-'@ | Set-Content -LiteralPath (Join-Path $ExpoHost 'app.json') -Encoding utf8NoBOM
+node (Join-Path $E2e 'scripts\create-expo-e2e-project.js') --source $E2e --project $ExpoHost --sdk-tarball $Candidate --sdk-sha256 $CandidateSha
 Set-Location $ExpoHost
-npm install
-npx expo prebuild --platform android --no-install
+npm install --no-audit --no-fund
+$env:CI='1'
+node node_modules/expo/bin/cli prebuild --platform android --no-install
+node (Join-Path $E2e 'scripts\assert-expo-e2e-project.js') --project $ExpoHost --sdk-sha256 $CandidateSha
 ```
 
 保存 `package-lock.json`、`npm ls --all --json` 和 Node/npm 版本；之后重建该轮用 `npm ci`。不要复制不完整依赖树、删运行文件来缩小宿主，或用安装成功替代 Metro/原生构建。
 
 ## 复用 UI 与限定测试网络
 
-```powershell
-New-Item -ItemType Directory -Force -Path e2e,scripts | Out-Null
-Copy-Item -LiteralPath (Join-Path $E2e 'src') -Destination src -Recurse
-Copy-Item -Path (Join-Path $E2e 'e2e\entry.v*.ts') -Destination e2e
-Copy-Item -LiteralPath (Join-Path $E2e 'e2e\localUpdateConfig.ts') -Destination e2e
-Copy-Item -LiteralPath (Join-Path $E2e 'scripts\local-e2e-server.ts') -Destination scripts
-@'
-import { registerRootComponent } from 'expo';
-import App from './src';
-registerRootComponent(App);
-'@ | Set-Content -LiteralPath index.js -Encoding utf8NoBOM
-@'
-const { getDefaultConfig } = require('expo/metro-config');
-const config = getDefaultConfig(__dirname);
-config.maxWorkers = 1;
-module.exports = config;
-'@ | Set-Content -LiteralPath metro.config.js -Encoding utf8NoBOM
-$Manifest = Join-Path $ExpoHost 'android\app\src\main\AndroidManifest.xml'
-$ManifestText = Get-Content -LiteralPath $Manifest -Raw
-if ($ManifestText.Contains('networkSecurityConfig')) { throw 'inspect existing network policy first' }
-$ManifestText.Replace('<application ', '<application android:networkSecurityConfig="@xml/network_security_config" ') | Set-Content -LiteralPath $Manifest -Encoding utf8NoBOM
-New-Item -ItemType Directory -Force -Path android\app\src\main\res\xml | Out-Null
-@'
-<?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
-  <base-config cleartextTrafficPermitted="false" />
-  <domain-config cleartextTrafficPermitted="true">
-    <domain includeSubdomains="false">10.0.2.2</domain>
-    <domain includeSubdomains="false">127.0.0.1</domain>
-  </domain-config>
-</network-security-config>
-'@ | Set-Content -LiteralPath android\app\src\main\res\xml\network_security_config.xml -Encoding utf8NoBOM
-```
+生成器复制 `src`、`localUpdateConfig.ts`、v1–v4、brick/fix/rescue-fix 入口，根 `index.js` 使用 Expo `registerRootComponent`，Metro/Babel 使用宿主 Expo 配置。SDK 仅安装工程内 `rn-update-candidate.tgz`，不引用工作树包或 registry SDK。
 
-该例外只允许测试宿主访问模拟器/回环地址；不修改 SDK 或生产示例的默认安全策略。重新 prebuild 会覆盖手工测试配置，应在全新宿主中重新应用并检查。标准 MainApplication 保留 ExpoReactHostFactory 与 ApplicationLifecycleDispatcher；不写 nativeConfig/currentHash，不携带 probe.bundle。Expo57 不支持旧架构。
+本地 `plugins/with-e2e-network.js` 在每次 prebuild 中固定 Manifest 与 XML：默认禁明文，仅 `10.0.2.2` 且不含子域例外。它不修改 SDK 或 `expoUsePakta` 的默认网络策略，遇到无关已有 networkSecurityConfig 时拒绝覆盖。标准 MainApplication 保留 ExpoReactHostFactory 与 ApplicationLifecycleDispatcher，不写 nativeConfig/currentHash、不携带 probe.bundle；Expo57 不支持旧架构。
+
+`assert-expo-e2e-project.js` 要求物理安装、全部 tgz 文件字节一致、React/RN/Expo 从应用和 SDK 解析到同一宿主目录，核对生成源码与正常 Expo 原生入口，并保存 `expo-e2e-validation.json`。该证明只覆盖输入与 prebuild，不等于 Gradle 或设备通过。`npm run test:expo-generator` 为离线正负控，长期 CI 使用同 run 四 ABI/声明打包候选；旧候选的设备结果不绑定新的生产修复。
 
 ## 构建与真实制品
 
@@ -122,5 +86,11 @@ python (Join-Path $E2e 'scripts\drive-expo-update-ui.py') --project-root $ExpoHo
 物理安装树全部900份候选文件与 `989603f4562957146935a50724a3beb010ac864c0feede42c0a4cbdc1c855cd1` 一致。该轮 Expo57.0.22/RN0.86.3 Release APK 为 `93272b4f6314b828f11a83304efb4aeabb6375525520ac1b7301cf9add416b14`，从 API36 x86_64 设备拉回的 APK 摘要相同；包内 x86_64 SDK SO 与该候选相同，HBC98、基座 bundle `9e8a18ec081ab57045d2516fe410f1691e2f57f2879107afd1090240ffd4890c`，没有 probe.bundle，见 `expo-network-artifact-identity.json`。错误候选摘要在接触设备前被拒绝，失败记录为 `expo-guard-negative.log`。
 
 最终 Apple 修复候选 `b5ed311d93edb83564357369a10dab59608012351bade92f6125cc6ac55de237` 与上述包逐份比对：各900文件、891文件相同，9处差异仅为7份Apple源码和2份Apple地图；全部 Android、JS、Harmony/HAR 输入逐字节相同，见 `expo-final-candidate-equivalence.json`。设备 APK 仍是以989603构建，以上仅证明未变平台输入等价；不把它写成重建完整b5ed包或Apple设备通过。该驱动尚未覆盖坏JS救砖及其他ABI的执行。
+
+## 2026-11-15 生成器与 runner 分层验证
+
+新的 `TEMP/px1115` 由仓内生成器以旧 `4818abac…` 候选真实创建，正常 `npm install` 安装476包，`npm ls --all --json` 退出0；本机 Expo prebuild 及重复 prebuild 均成功。独立门卫确认全部900份候选文件、19份复制源码、Expo57.0.22/React19.2.3/RN0.86.3单源、标准原生宿主及仅10.0.2.2网络，保存工程证明、安装锁/依赖树、工具版本和原始日志。首个较长目录 `TEMP/pakta-expo-generator-20261115-fresh` 的 npm 连接重置原始日志另存，未裁剪或拼接依赖树。本轮没有执行Gradle或设备，不把生成器输入验证记为后续Expo生产异常处理修复的候选验收。
+
+生成器离线9项正负控通过；真实Jest `--listTests` 确认普通Detox仅三套、独立Harmony native仅一套，连同RN077复制配置等3项回归共5项通过，均零skip。远程发现的误收集通过普通runner显式排除 `e2e/harmony-native/` 修复，独立套件继续保留其variant契约。以上不替代重跑远程设备job。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

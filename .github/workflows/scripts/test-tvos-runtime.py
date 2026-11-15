@@ -6,12 +6,16 @@
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 import importlib.util
+from contextlib import redirect_stdout
+import io
 import json
 from pathlib import Path
 import plistlib
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 import urllib.request
 from http.server import ThreadingHTTPServer
 
@@ -22,6 +26,61 @@ spec.loader.exec_module(module)
 
 
 class SafetyTests(unittest.TestCase):
+    def test_download_probe_allows_target_commit_but_activation_still_requires_health(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            cache = root / "Library/Caches/rctpakta"
+            cache.mkdir(parents=True)
+            driver = module.Driver.__new__(module.Driver)
+            driver.data, driver.out, driver.udid = root, root, "owned-udid"
+            driver.report = {"launches": []}
+            driver.protocol = SimpleNamespace(lock=threading.RLock(), state={"probes": []})
+            driver.terminate = lambda: None
+            driver.snapshot = lambda _label: None
+            driver.confirmed = lambda _version: False
+
+            def simctl(command, *_args, **kwargs):
+                if command == "launch":
+                    driver.protocol.state["probes"].append({
+                        "launchId": kwargs["env"]["SIMCTL_CHILD_PAKTA_TV_LAUNCH_ID"],
+                        "version": "v1", "isTV": True, "dev": False, "rendered": True,
+                        "metadata": {"currentVersion": module.VERSIONS["v1"],
+                                     "packageVersion": "1.0.0", "isFirstTime": False},
+                        "constants": {"downloadRootDir": str(cache)}})
+                    return module.BUNDLE_ID + ": 123"
+                return ""
+
+            def immediate_wait(label, read, _timeout=90):
+                value = read()
+                if not value:
+                    raise RuntimeError("not ready: " + label)
+                return value
+
+            driver.simctl = simctl
+            with patch.object(module, "wait", immediate_wait):
+                driver.launch("download-v2", "v1", confirm_health=False)
+                with self.assertRaisesRegex(RuntimeError, "healthy native v1"):
+                    driver.launch("activate-v1", "v1")
+
+    def test_constructor_rejection_preserves_actual_packaged_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            host = Path(directory)
+            app = host / "ios/build/Build/Products/Release-appletvsimulator/PaktaTVValidation.app"
+            app.mkdir(parents=True)
+            info = {"CFBundleIdentifier": module.BUNDLE_ID,
+                    "CFBundleExecutable": "PaktaTVValidation", "DTPlatformName": "appletvsimulator",
+                    "CFBundleShortVersionString": "2.0.0", "CFBundleVersion": "1"}
+            original = plistlib.dumps(info, fmt=plistlib.FMT_BINARY)
+            (app / "Info.plist").write_bytes(original)
+            (app / "PaktaTVValidation").write_bytes(b"release")
+            output = host / "evidence"
+            stream = io.StringIO()
+            with redirect_stdout(stream), self.assertRaisesRegex(ValueError, '"actual": "2.0.0"'):
+                module.Driver(SimpleNamespace(host=host, cli_root=host / "cli", output=output))
+            self.assertEqual((output / "app-Info.plist").read_bytes(), original)
+            self.assertEqual(json.loads((output / "app-identity.json").read_text()), info)
+            self.assertIn('"CFBundleShortVersionString": "2.0.0"', stream.getvalue())
+
     def test_release_app_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             app = Path(directory)

@@ -6,6 +6,7 @@ Android JVM 单元测试源集。纯逻辑沿用 Gradle JVM；Windows经WSL、Li
 ## 成员清单
 
 java/cn/reactnative/modules/update/AndroidRoundCancellationTest.java: 六项执行器边界回归，覆盖 HTTP/下载双代际主动取消、锁内配置拒绝回执和环境失败 breadcrumb 回收；不模拟真实网络或提交锁
+java/cn/reactnative/modules/update/ExpoHostExceptionTest.java: Expo 宿主专属四项适配器回归，直接执行真实 HostHandler，验证正式包重抛同一致命异常/保留受检异常因果链、开发态保留宿主处理与 Metro；非 Expo 源集排除，不冒充进程或救援设备证明
 java/cn/reactnative/modules/update/SyncRoundReplayTest.java: 回放共享向量中 28 条 Android 可产生的轮次，真实执行 AndroidRound，脚本替换引擎和 IO，逐项验证事件、命令参数、deadline、结果与 breadcrumb；不加载 JNI
 java/cn/reactnative/modules/update/BundledResourceCopierTest.java: 直接消费双 map 接口，以 ContextWrapper 包路径替身和真实 ZIP 验证多目标、规范化、split CRC 寻址、零 CRC、漂移/写失败拒绝及密度资格；T11后SafeZipFile保留路径检查加载真实JNI
 java/cn/reactnative/modules/update/CleanupKeepNamesTest.java: keepnames 槽位填充、去重与三版本延迟保护回归

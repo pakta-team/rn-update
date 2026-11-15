@@ -16,16 +16,21 @@ harmony-e2e-inputs.js: 只读 gzip/TAR 与 OHPM 复用门卫，完整 HAR 文件
 harmony-e2e-results.js: helper 与设备驱动共享的 HDC 安装回执门卫，接受传统成功句及 SDK26 路径回执与 AppMod finish 的完整组合，拒绝 unsuccessfully/Fail/Error；验收 Jest 两套当前工程结果和九项必需测试，拒绝空套件、过滤、跳过、缺失和错工程结果。
 harmony-e2e-results.test.js: HDC 传统/SDK26 真实回执、缺失完成行与失败混入、伪绿色汇总、缺失/跳过/重复用例及错工程 Jest 结果的持久负控。
 run-harmony-native-e2e.js: healthy/crash 独立短工程编排，复用构建/安装身份与固定完整结果门卫，原九项制品/结果不被覆盖，成功后归档实际HAP。
-harmony-native-results.js: 原生验收证据门卫，逐运行绑定真实请求/下载、非强制不激活、forced健康终态及同PID新JS fatal先于原生请求的证据。
+harmony-native-results.js: 原生验收证据门卫，逐运行绑定真实请求/下载、非强制不激活、原生markSuccess接受后回执、forced健康终态及同PID新JS fatal先于原生请求的证据。
 harmony-native-results.test.js: 陈旧runId/日志、错PID、缺下载、非强制误激活、错误终态和错套件等确定性正负控，不计作设备通过。
 hdc-sdk26-install-output.json: SDK26 真实安装 stdout 两行的 Base64 原字节夹具，保留成功句后的 ASCII 空格与 CRLF 且避免 Git 换行规范化，供共享结果门卫和 helper 安装证明回归使用。
 harmony-e2e.test.js: Node 持久正负控，覆盖候选/安装身份、RN 隔离、fallback、显式设备、清理边界、Release、严格 HAR 复用及完整测试证明；复用失败零命令，旧结果和测试中输入漂移不能生成成功证明，不冒充设备验收。
 harmony-e2e-map.md: 可供本机和临时 Windows runner 共用的分阶段命令、候选环境变量与证据边界，明确 prepare→base→build→diff 顺序及设备测试串行使用端口。
 compile-node-ts.js: 将 TS hook 编译到临时目录并解析 Node 可执行入口
 create-rn077-oldarch-project.js: 校验显式本地 tgz 后生成 RN 0.77.3/CLI 15.0.1 宿主；复制完整 JS/Node 编译配置与候选，清除仓库外类型别名、重定位 Metro/CLI 到安装树，拒绝覆盖既有工程
+create-expo-e2e-project.js: 只生成fresh Expo57/RN0.86.3宿主，显式候选/摘要与可选源码输入，复用UI/版本/坏JS入口并记录源码摘要；安装、prebuild和Gradle由调用方执行
+assert-expo-e2e-project.js: prebuild后核对完整物理候选、Expo/RN/React单源、生成输入、标准ExpoReactHostFactory与仅10.0.2.2网络，不访问设备
+expo-e2e-network-plugin.js: 复制到隔离宿主的ConfigPlugin模板，重复prebuild固定Manifest/XML，默认禁明文、仅10.0.2.2例外，拒绝覆盖无关网络策略
+expo-e2e-project.test.js: fresh/错摘要/完整候选/第二依赖树/网络扩散/入口注入与插件重复执行的离线正负控，不代称Expo设备执行
+jest-runner-boundaries.test.js: 真实Jest --listTests断言普通Detox仅三套、Harmony native仅一套，防止新增平台目录误收集；不执行用例或设备
 assert-rn077-oldarch.js: 校验候选摘要、关键安装字节和 JS/native 同根；--release 强制宿主与 SDK BuildConfig 均为旧架构且 APK 存在
 rn077-runtime-proof.js: 生成宿主启动前验证 RN077、legacyBridge 与 NativeModules.Pakta 同一对象，拒绝 bridgeless/Turbo/Fabric
-rn077-oldarch.test.js: Node 持久正负控，覆盖仓库外含空格 TEMP、候选篡改、双 BuildConfig 与运行时架构；SDK test:rn077-generator 及常规 test 接入
+rn077-oldarch.test.js: Node 持久正负控，覆盖仓库外含空格 TEMP、候选篡改、双 BuildConfig、运行时架构与复制后的独立Harmony native发现边界；SDK test:rn077-generator 及常规 test 接入
 rn077-oldarch-map.md: RN077 生成/候选/Release/设备分层证据与未验边界，明确旧 TEMP smoke 不等于生成器全链通过
 detect-ios-simulator-type.js: 选择与 Detox 一致的 iOS 模拟器 runtime
 drive-expo-update-ui.py: 显式候选全文件/物理安装守门后，通过 ADB/UI Automator 验证隔离 Expo 宿主两策略四阶段更新与重启，拒绝非 probe/e2e 应用数据清理
@@ -41,8 +46,8 @@ drive-android-crash-rescue.py: 显式设备/样例 APK 和救援制品摘要守�
 android-crash-rescue.test.py: 临时APK/PPK与阻断ADB的记录器验证摘要、Hermes版本、旧证据/服务和制品身份门卫；仅离线边界，不计作设备救援。
 run-android-crash-rescue.js: 本机/CI单宿主编排入口，验证已有APK和可选制品证明，异步驱动Python时维持自有HTTP服务，最后核输入摘要并关闭服务；与iOS复用准备器/服务协议。
 ios-rescue-server.ts: §11 历史 iOS 救砖实验服务；当前分阶段跨平台验收使用 crash-rescue-server.js
-drive-ios-crash-rescue.py: 显式Release app/UDID和制品Hermes版本的simctl坏JS验收；只读确认已成功并armed的砖、同PID fatal、无预下载和无forceBoot的crashRescue提交与修复重启，不写原生状态
-ios-crash-rescue.test.py: iOS救援驱动的应用身份、完整Release/Hermes输入及当前PID崩溃报告负控，不替代设备执行
+drive-ios-crash-rescue.py: 显式Release app/UDID和制品Hermes版本的simctl坏JS验收；当前启动PID退出必须关联原生终止stderr、严格native RCTFatal统一日志或系统异常报告，扫描Retired/当前simulator并始终保留诊断；只读确认armed、无预下载/forceBoot的原生救援与重启，不写状态
+ios-crash-rescue.test.py: iOS应用/Release/Hermes、双JSON与旧文本报告、原生stderr和统一日志的PID/应用/时间/类别负控，拒绝普通JS日志与陈旧报告，不替代设备执行
 load-compiled-e2e-hook.js: 加载 compile-node-ts 产物供 Jest global hook 转发
 local-e2e-server.ts: 提供本地版本、制品、forceBoot控制及只读/state请求时间线，供独立原生套件确认无JS点击的真实检查/下载
 prepare-local-update-artifacts.ts: 以 v1 Hermes HBC 为 epoch 生成 full/diff/ppk/v2-track 本地更新制品；显式 RNU_E2E_BUNDLER=expo 复用 Expo export:embed，Harmony 保持独立路径

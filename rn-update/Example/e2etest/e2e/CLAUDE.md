@@ -7,7 +7,7 @@
 
 CLAUDE.md: e2e 套件拓扑、runner 边界与成员地图
 android-boundaries.test.ts: Android Release 真实损坏/缺失 diff 拒绝、已确认版本保持与进程重启回归；临时制品写入始终恢复，manifest 禁全量兜底
-ANDROID_DEVICE_MATRIX.md: 新旧架构/Expo制品到设备的原始摘要；保留b5ed/df181历史及4818最终GEB的830项Android/796项Apple输入证明，明确C++仅注释主体等价与HAR/JS/SO字节相同的区别
+ANDROID_DEVICE_MATRIX.md: 新旧架构/Expo制品到设备的原始摘要与真坏 JS 救援续验；保留历史候选/消费等价边界，分别记录 RN085/RN077 真救援通过与 Expo 吞异常首败，不把 JVM 或其他宿主绿色外推
 bundle-hash.test.ts: 读取 iOS 缓存或 Android 原生桥诊断，以跨平台 ZIP 解析核对 bundleHash 与字节摘要
 detox-hooks.d.ts: Detox globalSetup/globalTeardown 的环境声明
 entry.brick.ts: §11 救砖实验的故障 bundle 入口，故意在启动后触发崩溃
@@ -26,7 +26,7 @@ harmony-native.jest.config.js: Harmony 原生 forceBoot/失败 JS 的独立单�
 harmony/: HarmonyOS 更新流与 smoke 测试
 harmony-native/: 显式隔离 HAP 的 healthy/crash 验收，关联服务器实际请求、存活 PID、故障日志与健康重启
 harness/: HarmonyOS 设备 UI 驱动和布局解析适配
-jest.config.js: 常规 Detox 本地更新 runner，排除独立平台套件
+jest.config.js: 常规 Detox 三套本地更新 runner，明确排除 Harmony、Harmony native、smoke 与 native，独立平台环境不混入 Android/iOS core
 local-merge.test.ts: Android/iOS full、ppk、package 与以 Hermes v1 为基线的 v2-track 串行更新验收
 localUpdateConfig.ts: 各平台本地端点、制品、hash、label 与最终状态常量
 LOCAL_WINDOWS_ANDROID_TEST.md: 当前 Windows Android SDK/AVD 的 Release APK、制品、Detox 套件、局域网真机真服务与故障排查手册

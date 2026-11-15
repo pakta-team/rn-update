@@ -222,6 +222,12 @@ android {
                 java.exclude 'expo/modules/pakta/**'
             }
         }
+        test {
+            // 专项消费真实 Expo 接口；普通 RN 宿主没有 Expo 编译依赖。
+            if (!expoProject) {
+                java.exclude '**/ExpoHostExceptionTest.java'
+            }
+        }
     }
 
     // AGP 9 disables the resValues feature for libraries by default; the

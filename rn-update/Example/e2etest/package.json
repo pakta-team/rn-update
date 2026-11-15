@@ -14,6 +14,8 @@
     "harmony:e2e": "node scripts/run-harmony-e2e.js",
     "harmony:native": "node scripts/run-harmony-native-e2e.js",
     "test:harmony-orchestrator": "node --test scripts/harmony-e2e.test.js scripts/harmony-e2e-results.test.js scripts/verify-update-artifacts.test.js scripts/harmony-native-results.test.js",
+    "test:expo-generator": "node --test scripts/expo-e2e-project.test.js",
+    "test:runner-boundaries": "node --test scripts/jest-runner-boundaries.test.js",
     "lint": "biome check .",
     "apk": "node scripts/run-gradle.js assembleRelease",
     "apk:local-device": "node scripts/build-local-device-android.js",

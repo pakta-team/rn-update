@@ -7,10 +7,10 @@ CI 编排层。YAML 工作流把 npm/bun 校验、Android/iOS/Harmony E2E、发�
 
 ci-failure-email.yml: 常规分支失败 run 的 issue 通知与恢复关闭；codex/verify- 验证分支不创建、评论或关闭 issue
 cli.yml: master/main/codex验证分支 push 与 CLI 相关 PR 执行静态/单测、精确 Node 18.17 smoke、固定四组 Hermes 编译器与夹具 Hash 验证及 seeded fuzz；接线不代表远端已通过
-e2e_android.yml: 先重建四 ABI SO 并发布 SHA256SUMS，设备矩阵下载校验同轮产物；RN077 以同轮 SO/声明生成显式 tgz并由构建前后守卫绑定旧架构；emulator action 的独立 shell 以绝对 workspace 路径定位宿主，不依赖 run 默认目录
-e2e_harmony.yml: 保留Mac手动构建/设备链；Windows仅精确codex/verify-harmony-win-20261115 push或显式dispatch windows，唯一runner label、source隔离checkout和全新D:\r\hw1115，固定4818最终GEB候选/92bb HAR后跑双ABI Release、WSL真差分与完整设备suite
-e2e_ios.yml: iOS core/native两组单worker更新链；native在Detox释放服务后追加真实坏JS崩溃救援、独立同epoch Hermes PPK、无forceBoot修复和always证据；受信main/master core才写每日内容缓存，app原生精确key不变
-expo_build.yml: Expo57/RN0.86.3 Android/iOS Release 源码消费编译；隔离本地 SDK 并断言依赖归宿主，prebuild 后编译 Kotlin/Swift/共享核，Apple 显式确认 Expo subspec、bundleURL flag 与 Delegate 注册；不代表设备更新或发布候选
+e2e_android.yml: 同轮四ABI/SHA256SUMS供设备矩阵消费，RN077以同轮SO/声明生成候选并绑定旧架构；两个Release leg在正常core/native Detox后用同一APK、宿主CLI和独立两Hermes PPK追加真坏JS救援，显式允许限定测试目录的hidden证据上传；emulator独立shell均使用绝对workspace路径
+e2e_harmony.yml: 保留Mac手动链；Windows仅精确专用分支/dispatch，以唯一runner label和source隔离checkout固定68ab/92bb，hw1116原九项后hn1116顺序healthy/crash原生场景，显式白名单JSON/日志/HAP包含hidden路径并always上传；Git LF/OpenSSL/HTTP1.1仅job进程生效
+e2e_ios.yml: iOS core/native两组单worker更新链；native在Detox释放服务后追加真实坏JS崩溃救援、独立同epoch Hermes PPK、无forceBoot修复，限定救援目录显式包含hidden路径并always上传；受信main/master core才写每日内容缓存，app原生精确key不变
+expo_build.yml: 保留Expo57/RN0.86.3两平台源码Release编译；独立API36 x86_64设备leg先同run四ABI/types打Android用途候选，再fresh expoprobe完整npm/prebuild/候选全字节守门/Release与真坏JS救援，保存候选、实际APK和项目/设备证据；候选构建脚本变化也触发，不作为跨平台发布候选
 lint.yml: master/main 的 PR/push 与 codex验证分支 push 执行 SDK Biome、TypeScript、Harmony 声明和 Native Spec 一致性检查
 publish.yml: 四ABI重建后、上传前以Node24执行禁串/Android verifier正负控；同步Release版本后重建分支显式release构建HAR、校验并以--har执行BuildProfile及新增禁串专项；两分支release:prepare各仅pack一次，同一tgz清单/声明消费后发布前核对SHA-256，保留OIDC/contents与provenance/public/beta权限；复用HAR仍显式校验前版版本，不硬套当前版本专项
 test.yml: 递归检出后分层执行JNI/JVM、同轮HAR→包消费、共享核/Apple源码/Foundation；Linux常驻Android/iOS/tvOS驱动负控；macos-26固定RN-tvos0.85.3-3真RCTAppDelegate/Release链接后，执行真实JS/原生forceBoot双版本/缓存清理回包与在线purgeRestore，always保存运行证据
@@ -86,7 +86,20 @@ PowerShell入口拒绝已有短工程、checkout内签名、非实体文件、�
 
 本地tvOS宿主实体安装476包，同源守卫、RN-tvos0.85.3-3真实Metro/Hermes base PPK生成通过；tvOS六门卫在WSL Linux全过0skip，Windows因缺symlink权限的首轮1错误保留，不伪装跨平台通过。iOS五项、Android八项输入负控及变更workflow actionlint通过。以上新增场景尚待下一安全SHA实际Mac/simctl运行，不将编包或静态接线记作设备通过。
 
+## 2026-11-15 原生救援长期流程增量
 
-## 2026-11-15 tvOS 独立回归输入
+1263f3048a89已独立冻结并推codex/verify-apple-runtime-20261115，test43675771867/iOS43675771855实际运行，未触Harmony精确分支。该SHA之后的Android流程在RN085/RN077原两组Detox后追加共享run-android-crash-rescue.js，显式原APK/宿主/CLI/设备和fresh证据，always上传；不重建或替换已编译APK。Harmony下一轮使用尚不存在的hw1116/hn1116双短工程，先完整原九项，再隔离healthy/crash all，healthy刷新依赖，crash仅门卫允许时严格复用；每variant归档独立HAP，不覆盖原九项。Git检出LF/OpenSSL/HTTP1.1仅job进程且TLS校验保留，不写global。
 
-1263真tvOS应用已完成Xcode链接、六门卫及base→v1原生GET/激活/健康确认/新PID保持；驱动在正常持久启动省略nil isFirstTime时KeyError，job132695473612失败，官方artifact14146162845保留，不记整套成功。本快照仅修三个tvOS夹具及地图：正常省略marker仍需原生健康状态，首次true仍必须accepted=true；Info.plist明确1.0.0/1，并新增app/JS/nativeConfig版本门卫。Linux七门卫及四个真实探针边界重放通过；v2/purge全链仍须本SHA真实执行。其余SDK/CLI/工作流逐字节沿1263，不混后续Expo生产Java或新Android/Harmony接线。
+该增量PS AST、两份actionlint、31段Bash与原两条Detox保留断言通过；仓外含空格实体source夹具PlanOnly通过，原工程复用/两工程相同/错摘要三个负控按预期拒绝，实际hw1116/hn1116均未创建，零设备命令，未读取签名内容。证据harmony-native-windows-ci-offline.json。SDK另已完成本机healthy56.126秒/crash52.428秒各1pass0skip，但本段只登记CI接线，不把本机结果记为新Actions通过；下一次安全冻结与实际runner需单独登记。
+
+1263真tvOS编译/链接及六门卫通过，实际运行已到base→原生GET→v1 accepted=true→新PID保持v1；随后驱动把正常省略的nil isFirstTime当必需键而KeyError，job132695473612失败，官方artifact14146162845完整保留，不记为整套成功。驱动现只把true当首次且仍要求accepted=true/原生isFirstLoadOK；增加该回归后七门卫Linux全过，并用四个真实探针重放边界。另修宿主Info.plist明确CFBundleShortVersionString/CFBundleVersion，新增app/JS/nativeConfig包版本守卫，避免原Xcode INFOPLIST_KEY设置未产生包版本。后续v2/purge全链仍须新SHA实跑。
+
+新Expo设备leg显式重建四ABI并通过readCandidate逐字节核候选SO=本轮源库，只作为Android用途候选；生成/安装/prebuild/完整安装树断言分步执行，API36 x86_64真实坏JS服务与设备证据独立上传。RN077/Expo调用checkout共享制品门卫前均显式安装checkout e2etest锁定依赖，闭合node-stream-zip解析，不借历史node_modules或NODE_PATH。
+
+1263的iOS native真实坏JS在withheld阶段已通过当前PID退出守门，但随后未匹配到BRICK崩溃报告，job132695473183因此失败；上传又因actions/upload-artifact默认排除hidden目录而没有保存`.e2e-artifacts`证据。现仅对iOS救援、Android两救援/RN077 Detox/已列Metro日志和Harmony显式白名单启用include-hidden-files，不扩大路径或上传签名。该SHA的iOS core与Android两Release普通套件误收Harmony native，后续SDK修正发现边界；旧失败保持原身份。
+
+下一Windows入口固定68abd9ff候选/92bb HAR，原4818设备与Actions证据不改写。含空格source夹具的新PlanOnly通过；两工程同址、旧摘要及旧候选三负控拒绝，四workflow YAML、67段Bash、PS AST及6个限定hidden上传断言通过，实际hw1116/hn1116仍未创建、零设备命令、未启动runner，见TEMP/pakta-platform-validation-20261114/harmony-68ab-and-hidden-evidence-verification.json。68ab只改变Expo生产异常委托及其局部地图/非Expo test源集，HAR和Apple输入逐字节未变，仍须将下一runner环境tgz指向pakta-release-MwKP7x而不能仅换摘要。
+
+tvOS五文件overlay f5cd77994170真实运行结果为lint及test其余七job成功；tvOS最终链接和七门卫通过，但在创建simulator前被app身份门卫拒绝，artifact14147251132的SHA256为3c83f27ae0b8b197d8e7fee0d321e5ce1c364238394c9b79f005c13cde21857c。原证据未包含最终plist，不能断言具体缺键。现为自定义plist补齐标准BundleIdentifier/Executable/Name/PackageType/InfoDictionaryVersion契约，保留固定版本，不改SDK；运行前保存最终plist与五字段并报精确expected/actual，构建后打印最终plist和七项Xcode设置，artifact只新增最终plist精确路径。八门卫含构造失败仍保留真实二进制plist回归；后续仍须以新SHA证实实际应用身份和完整OTA/清缓存恢复。
+
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

@@ -281,6 +281,11 @@ jobs:
             CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build | tee ../tvos-build.log
           app=build/Build/Products/Release-appletvsimulator/PaktaTVValidation.app
           test -f "$app/PaktaTVValidation"
+          plutil -p "$app/Info.plist" | tee ../app-info.log
+          xcodebuild -project PaktaTVValidation.xcodeproj -target PaktaTVValidation \
+            -configuration Release -sdk appletvsimulator -showBuildSettings \
+            | grep -E '^[[:space:]]+(PRODUCT_BUNDLE_IDENTIFIER|EXECUTABLE_NAME|INFOPLIST_FILE|GENERATE_INFOPLIST_FILE|MARKETING_VERSION|CURRENT_PROJECT_VERSION|PLATFORM_NAME) =' \
+            | tee ../app-build-settings.log
           xcrun nm "$app/PaktaTVValidation" > ../linked-symbols.txt
           grep -F 'OBJC_CLASS_$_RCTPakta' ../linked-symbols.txt
           xcrun otool -L "$app/PaktaTVValidation" > ../linked-frameworks.txt
@@ -302,6 +307,7 @@ jobs:
             ${{ runner.temp }}/pakta-tvos-host/*-*.log
             ${{ runner.temp }}/pakta-tvos-host/linked-*.txt
             ${{ runner.temp }}/pakta-tvos-host/ios/Podfile.lock
+            ${{ runner.temp }}/pakta-tvos-host/ios/build/Build/Products/Release-appletvsimulator/PaktaTVValidation.app/Info.plist
             ${{ runner.temp }}/pakta-tvos-host/bun.lock
             ${{ runner.temp }}/pakta-tvos-host/runtime-evidence
           if-no-files-found: warn

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 [INPUT]: 依赖隔离 RN-tvos Release 宿主、当前 CLI、simctl 与 SDK 只读安装/defaults 状态
-[OUTPUT]: 验证真实 JS、原生 forceBoot 两版本、健康重启、仅删 Caches 后回包与在线重装
+[OUTPUT]: 验证真实 JS、原生 forceBoot 两版本、健康重启与缓存恢复；构造拒绝也留最终 app 身份诊断
 [POS]: tvOS 设备验收驱动；服务只发版本响应，绝不写 SDK defaults、安装记录或版本目录
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -68,12 +68,14 @@ def wait(label, read, timeout=90):
 def require_test_app(app):
     with (app / "Info.plist").open("rb") as source:
         info = plistlib.load(source)
-    if (info.get("CFBundleIdentifier") != BUNDLE_ID or
-            info.get("CFBundleExecutable") != "PaktaTVValidation" or
-            info.get("DTPlatformName") != "appletvsimulator" or
-            info.get("CFBundleShortVersionString") != "1.0.0" or
-            info.get("CFBundleVersion") != "1"):
-        raise ValueError("Expected the dedicated tvOS simulator Release app")
+    expected = {"CFBundleIdentifier": BUNDLE_ID, "CFBundleExecutable": "PaktaTVValidation",
+                "DTPlatformName": "appletvsimulator", "CFBundleShortVersionString": "1.0.0",
+                "CFBundleVersion": "1"}
+    mismatches = {key: {"expected": value, "actual": info.get(key)}
+                  for key, value in expected.items() if info.get(key) != value}
+    if mismatches:
+        raise ValueError("Expected the dedicated tvOS simulator Release app: " +
+                         json.dumps(mismatches, ensure_ascii=False))
     if not (app / "PaktaTVValidation").is_file():
         raise ValueError("Release executable is missing")
     return info
@@ -198,6 +200,14 @@ class Driver:
         self.out = Path(args.output).resolve()
         self.out.mkdir(parents=True, exist_ok=False)
         self.app = self.host / "ios/build/Build/Products/Release-appletvsimulator/PaktaTVValidation.app"
+        # ---------- 构造门卫失败也保留实际打包身份，不用源码 plist 推断 Xcode 产物 ----------
+        shutil.copyfile(self.app / "Info.plist", self.out / "app-Info.plist")
+        with (self.app / "Info.plist").open("rb") as source:
+            info = plistlib.load(source)
+        identity = {key: info.get(key) for key in ["CFBundleIdentifier", "CFBundleExecutable",
+                    "DTPlatformName", "CFBundleShortVersionString", "CFBundleVersion"]}
+        (self.out / "app-identity.json").write_text(json.dumps(identity, indent=2), encoding="utf8")
+        print("tvOS packaged app identity: " + json.dumps(identity), flush=True)
         require_test_app(self.app)
         self.udid, self.server, self.data = None, None, None
         self.protocol = Protocol(self.out / "artifacts", self.out / "server-state.json")
@@ -227,7 +237,7 @@ class Driver:
         subprocess.run(["xcrun", "simctl", "terminate", self.udid, BUNDLE_ID],
                        capture_output=True, timeout=30)
 
-    def launch(self, label, version):
+    def launch(self, label, version, confirm_health=True):
         self.terminate()
         launch_id = str(uuid.uuid4())
         environment = {**os.environ, "SIMCTL_CHILD_PAKTA_TV_LAUNCH_ID": launch_id}
@@ -259,7 +269,8 @@ class Driver:
         self.simctl("io", self.udid, "screenshot", self.out / (label + ".png"))
         if version != "base":
             require_health_acknowledgement(observed)
-            wait("healthy native " + version, lambda: self.confirmed(version))
+            if confirm_health:
+                wait("healthy native " + version, lambda: self.confirmed(version))
         self.snapshot(label)
         return observed
 
@@ -372,7 +383,8 @@ class Driver:
         for version in ["v1", "v2"]:
             stage = self.protocol.stage(version, "native-force-" + version)
             running = "base" if version == "v1" else "v1"
-            self.launch("download-" + version, running)
+            # 下载可先提交目标版本；旧 JS 探针不要求原生 currentVersion 仍停在旧版。
+            self.launch("download-" + version, running, confirm_health=False)
             wait("actual native GET/install " + version,
                  lambda: self.installed(version, stage["at"]), 90)
             self.launch("activate-" + version, version)

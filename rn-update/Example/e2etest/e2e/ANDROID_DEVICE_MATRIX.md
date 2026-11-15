@@ -67,4 +67,22 @@ Release 构建通过；instrumentation 依赖因 Google Maven 超时，最后通
 
 本轮不代称其他 ABI/物理机、API34、iOS/tvOS、完整坏 JS 救援、Actions 或生产准入。候选冻结与发布由根回执单独管理。
 
+## 2026-11-15 真坏 JS 崩溃窗口救援续验
+
+本节独立更新上文历史“未执行”边界。证据根为 `%TEMP%/pakta-android-crash-rescue-20261115`，本轮新启动的同名 AVD 实际 serial 是 `emulator-5556`（API36/x86_64）；旧 `5554` 报告不改。`sdk4818-current-consumption-equivalence.json` 重新核对三个宿主各 830 项 Android 消费输入、既有 APK/HBC/SO 与 4818 候选关系；执行源观测在 RN085 首轮已启动后保存，只能证明观测后未变，不能反称该轮起始快照。
+
+| 宿主 | 实际结果 | 原始证据 |
+| --- | --- | --- |
+| RN0.85.2 新架构 | 真坏 JS 救援通过，复用上文 `b6cb1cc9…` APK、独立 HBC98 两 PPK | `rn085/run1/run-result.json`、`device/result.json`，runId `294f7891-6896-4329-a6e8-b7a8dcc68ba4` |
+| RN0.77.3 旧架构 | 真坏 JS 救援通过，复用上文 `837eb3e4…` APK、独立 HBC96 两 PPK | `rn077/run1/run-result.json`、`device/result.json`，runId `cbb13113-7b63-432c-ac35-47165ce9c56c` |
+| Expo57/RN0.86.3 | 首轮保留失败；修复后新候选真实重建 APK，第二轮真救援通过，原 HBC98 两 PPK 不变 | `expo/run1/device/result.json` 保留吞异常失败；`expo/run2/run-result.json`、`device/result.json` 为通过，runId `f0cd18d4-f85a-4fcd-98b4-2788c0a0fa5a` |
+
+前两宿主均先以 `lastEvent: forceBootRescue` 确认 brick 的原生 markSuccess，随后分别捕获 fix 封锁/开放时两个当前 PID 的真实 `BRICK` fatal 与退出。fix 响应无 config/forceBoot、无预下载，崩溃窗口完成 GET；修复启动原生 hashInfo 为 `crashRescue:true`，UI 出现 `lastEvent: crashRescue`，sealed 后再次重启保持。APK/PPK 在运行前后摘要不变，不点击 JS Check Update、不注入 SDK 状态。
+
+Expo 原失败 APK `93272b4f…` 已复制到 `expo/run1/inputs/app-release.apk` 并核同摘要，保留原报告路径和失败日志。根因是 SDK 的 Expo HostHandler 未处理 `onReactInstanceException`，新版 Expo 在非空 handler 列表分发后不再兜底重抛。适配器补正式包的 RN 默认异常传播，开发态不干预；SDK50 官方旧接口缺该方法，生产方法不加 `@Override`，以同名方法兼容旧编译并覆写新接口。最终四项 JVM 对 4818 原实现红两项、修复版全绿；真实 SDK50 接口编译与同四项 JVM 也通过，临时加回 `@Override` 编译负控失败。这些是接口证明，不冒称完整 Expo50 宿主或设备。
+
+新候选 `%TEMP%/pakta-release-MwKP7x/rn-update-1.1.0.tgz` SHA-256 `68abd9ffdb3a93f2b9df5ed3a893b01c77537c1b8d7ee9a154ba5c4cbc5937da`，在既有隔离 Expo 宿主物理 staging 900 个发包文件并全字节核对；依赖声明指向新 tgz，不冒称重新包管理安装或锁文件刷新。真实 Release 重建成功，冻结 APK `expo/candidate68-app-release.apk` SHA-256 `d9241e842a22c5ae99500fcd64d85bf885575549bf9c67db725248f7f4d6b6ee`；其基座 HBC 与首败 APK 逐字节相同，x86_64 SO 与新候选一致，构建后与设备完成后 900 文件仍全字节匹配。
+
+Expo 第二轮也通过上述两次真实 fatal/退出、无预下载/无 forceBoot、原生 `crashRescue:true`、UI事件及 sealed 后重启；原 brick/fix 完全不变，说明修复的是宿主异常传播而非替换故障输入。`android-crash-rescue-summary.json` 独立重核三宿主原始日志/输入/服务时序并封存；明确 RN085/RN077 保留 4818 消费关系、Expo 使用 68ab 新构建，不把三者写成同一完整候选重建。七份执行源观测后至最终摘要均未漂移。
+
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

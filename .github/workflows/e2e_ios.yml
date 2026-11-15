@@ -140,6 +140,9 @@ jobs:
       - name: Install e2etest dependencies
         run: cd Example/e2etest && bun install --frozen-lockfile
 
+      - name: Verify core and Harmony runner discovery stay isolated
+        run: cd Example/e2etest && bun run test:runner-boundaries
+
       - name: Link local rn-update
         run: |
           set -euo pipefail
@@ -263,5 +266,6 @@ jobs:
         with:
           name: ios-crash-rescue-evidence
           path: rn-update/Example/e2etest/.e2e-artifacts/ios-crash-rescue-*
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7

@@ -1,5 +1,5 @@
 # [INPUT]: 依赖显式 Harmony runner、进程级 Git LF 检出设置、候选/HAR、DevEco、外部签名和指定 HDC 目标
-# [OUTPUT]: 保留 macOS 手动矩阵，提供专用验证分支的 Windows 双 ABI Release/真实差分/设备链
+# [OUTPUT]: 保留 macOS 手动矩阵，Windows 双 ABI/真实差分/九项后追加独立健康原生与坏 JS 套件
 # [POS]: Harmony 运行编排；Windows 只在独立 source checkout 和全新短工程执行，不覆写本机主仓库
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 #
@@ -134,10 +134,14 @@ jobs:
         working-directory: source/rn-update
     env:
       # 仅覆盖本 job 的 Git 配置，子模块继承；不写 self-hosted 用户全局配置。
-      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_COUNT: '3'
       GIT_CONFIG_KEY_0: core.autocrlf
       GIT_CONFIG_VALUE_0: 'false'
-      RNU_HARMONY_SDK_SHA256: 4818abacdfd97e308b80f8f8bbbb96ade221d58f1135e0a703d7b5069cc06cbf
+      GIT_CONFIG_KEY_1: http.sslBackend
+      GIT_CONFIG_VALUE_1: openssl
+      GIT_CONFIG_KEY_2: http.version
+      GIT_CONFIG_VALUE_2: HTTP/1.1
+      RNU_HARMONY_SDK_SHA256: 68abd9ffdb3a93f2b9df5ed3a893b01c77537c1b8d7ee9a154ba5c4cbc5937da
       RNU_HARMONY_HAR_SHA256: 92bb0c023ca9a4c2160a7ed20db8ea19bf7437b7eac8f2e64733f592935bc9ff
     steps:
       - name: Checkout isolated validation source
@@ -161,6 +165,10 @@ jobs:
             source/rn-update/Example/e2etest/.e2e-artifacts/harmony-ci/*.json
             source/rn-update/Example/e2etest/.e2e-artifacts/harmony-ci/*.log
             source/rn-update/Example/e2etest/.e2e-artifacts/harmony/*.json
+            source/rn-update/Example/e2etest/.e2e-artifacts/harmony-native/**/*.json
+            source/rn-update/Example/e2etest/.e2e-artifacts/harmony-native/**/*.log
+            source/rn-update/Example/e2etest/.e2e-artifacts/harmony-native/**/native-signed.hap
             source/rn-update/Example/e2etest/.e2e-artifacts/server.log
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7

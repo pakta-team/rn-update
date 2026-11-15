@@ -1,5 +1,5 @@
 # [INPUT]: 依赖当前 SDK/CLI、固定 NDK 与 React Native 消费端工程
-# [OUTPUT]: 提供同轮四 ABI 库及 Android Release/Debug/旧架构设备验证
+# [OUTPUT]: 提供同轮四 ABI 库及 Release/Debug/旧架构设备验证，两个 Release leg 追加真实坏 JS 救援
 # [POS]: Android 宿主矩阵；校验同轮原生库，action 内设备命令显式定位 workspace 中的宿主
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 name: e2e-android
@@ -132,6 +132,9 @@ jobs:
       - name: Install e2etest dependencies
         run: cd Example/e2etest && bun install --frozen-lockfile
 
+      - name: Verify core and Harmony runner discovery stay isolated
+        run: cd Example/e2etest && bun run test:runner-boundaries
+
       - name: Remove committed Android native libraries
         run: rm -rf android/lib
       - name: Use CI-built Android native libraries
@@ -199,6 +202,17 @@ jobs:
             # 原生冷启动检测有自己的 runner 配置(见 e2e/native/jest.config.js);
             # Android 这个 job 有预算,不必像 iOS 那样拆成独立 job
             cd "$GITHUB_WORKSPACE/rn-update/Example/e2etest" && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1 --config e2e/native/jest.config.js
+            node "$GITHUB_WORKSPACE/rn-update/Example/e2etest/scripts/run-android-crash-rescue.js" --project "$GITHUB_WORKSPACE/rn-update/Example/e2etest" --cli "$GITHUB_WORKSPACE/rn-update-cli" --apk "$GITHUB_WORKSPACE/rn-update/Example/e2etest/android/app/build/outputs/apk/release/app-release.apk" --serial "$(adb get-serialno)" --package com.awesomeproject --output "$GITHUB_WORKSPACE/rn-update/Example/e2etest/.e2e-artifacts/android-crash-rescue-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Preserve real bad-JS crash-rescue evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-crash-rescue-rn085
+          path: rn-update/Example/e2etest/.e2e-artifacts/android-crash-rescue-*
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
@@ -343,6 +357,7 @@ jobs:
             rn-update/Example/e2etest/artifacts
             rn-update/Example/e2etest/.e2e-artifacts/metro.log
             rn-update/Example/e2etest/.e2e-artifacts/metro-prewarm.log
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
@@ -412,6 +427,14 @@ jobs:
 
       - name: Install SDK declaration build dependencies
         run: bun install --frozen-lockfile
+
+      - name: Install the shared rescue artifact verifier dependencies
+        run: cd Example/e2etest && bun install --frozen-lockfile
+
+      - name: Verify copied RN077 and shared runner boundaries
+        run: |
+          node --test Example/e2etest/scripts/rn077-oldarch.test.js
+          cd Example/e2etest && bun run test:runner-boundaries
 
       - name: Create the Android SDK candidate from this run's native libraries
         # RN077 必须安装候选本身，后续不能用 checkout 链接替换并绕过候选守卫。
@@ -490,6 +513,17 @@ jobs:
           script: |
             cd "$GITHUB_WORKSPACE/rn-update/.e2e-rn077-oldarch/AwesomeProject" && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
             cd "$GITHUB_WORKSPACE/rn-update/.e2e-rn077-oldarch/AwesomeProject" && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1 --config e2e/native/jest.config.js
+            node "$GITHUB_WORKSPACE/rn-update/Example/e2etest/scripts/run-android-crash-rescue.js" --project "$GITHUB_WORKSPACE/rn-update/.e2e-rn077-oldarch/AwesomeProject" --cli "$GITHUB_WORKSPACE/rn-update-cli" --apk "$GITHUB_WORKSPACE/rn-update/.e2e-rn077-oldarch/AwesomeProject/android/app/build/outputs/apk/release/app-release.apk" --serial "$(adb get-serialno)" --package com.awesomeproject --output "$GITHUB_WORKSPACE/rn-update/.e2e-rn077-oldarch/AwesomeProject/.e2e-artifacts/android-crash-rescue-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Preserve real old-architecture crash-rescue evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-crash-rescue-rn077
+          path: rn-update/.e2e-rn077-oldarch/AwesomeProject/.e2e-artifacts/android-crash-rescue-*
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
@@ -498,6 +532,7 @@ jobs:
         with:
           name: e2e-android-rn077-oldarch-detox-artifacts
           path: rn-update/.e2e-rn077-oldarch/AwesomeProject/artifacts
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 

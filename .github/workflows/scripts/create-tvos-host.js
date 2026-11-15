@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖当前 checkout SDK 源码和明确的空输出目录；生成宿主固定 RN-tvos/React/CLI 版本
- * [OUTPUT]: 提供独立 tvOS RN 应用、base/v1/v2 运行探针、Podfile/Xcode 工程与依赖/源码同源断言
+ * [OUTPUT]: 提供独立 tvOS RN 应用、完整包身份 plist、base/v1/v2 运行探针和同源断言
  * [POS]: CI 的真实 tvOS 消费端；物理隔离 SDK，运行时只确认健康，不由 JS 检查、下载或激活更新
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -106,6 +106,11 @@ fs.mkdirSync(path.join(destination, 'ios'));
 fs.writeFileSync(path.join(destination, 'ios/Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+<key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+<key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 <key>CFBundleShortVersionString</key><string>1.0.0</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>

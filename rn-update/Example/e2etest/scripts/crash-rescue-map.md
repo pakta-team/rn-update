@@ -25,6 +25,10 @@
 
 驱动只清理上述已知样例包，安装明确 APK；验证 base→native forceBoot brick、真实 markSuccess 与 armed，再以 fix 封锁的一次 fatal 证明坏 JS，随后开放无 forceBoot fix 并观察下一次真实 fatal/崩溃窗口下载/进程退出。恢复启动必须显示 FIXED/hash、读取原生 crashRescue=true，并在 sealed 后再次重启保持。全过程无 Check Update 点击、无 SharedPreferences/安装目录注入。该脚本编写完成和离线服务测试均不代表 RN085/RN077/Expo 设备已验收。
 
-iOS 由 `drive-ios-crash-rescue.py` 使用 simctl、真实 crash report PID 与只读 plist/安装目录验证同一服务协议；其输入和执行证明由 iOS 平台流程单独登记。
+iOS 由 `drive-ios-crash-rescue.py` 使用 simctl 与只读 plist/安装目录验证同一服务协议。实际 launch PID 必须退出，并关联本次独立 stderr 中含 BRICK 的原生 uncaught 终止行、同 PID/启动时间窗口/应用路径的 RN native 类别 `Unhandled JS Exception` 统一日志，或含 BRICK、当前 PID、应用身份和致命异常类型的系统报告；普通 JavaScript 日志与单独进程消失均拒绝。报告扫描兼容双 JSON `.ips`、文本 `.crash`、Retired 和当前 simulator 日志目录，失败候选、逐启动输出及统一日志始终保留，CI 限定证据目录显式上传隐藏文件。其输入和执行证明由 iOS 平台流程单独登记。
+
+## 2026-11-15 Android 真实运行
+
+`%TEMP%/pakta-android-crash-rescue-20261115/android-crash-rescue-summary.json` 已封存 RN085/RN077/Expo 三宿主在 API36/x86_64 的真救援通过：两次当前 PID fatal/退出，fix 先封锁后开放且无 forceBoot，原生 hashInfo 为 `crashRescue:true`，封存后重启保持。RN085/RN077 保留 4818 的既有 APK 消费关系；Expo 首轮吞异常失败保留，经生产适配器修复、68ab 新候选真实重建 APK 后 run2 通过，原坏包/修复包与基座 HBC 均不变。不能将该异构身份写成三宿主都以 68ab 完整重建。具体摘要、故障根因、兼容回归及证据路径见 [Android矩阵](../e2e/ANDROID_DEVICE_MATRIX.md#2026-11-15-真坏-js-崩溃窗口救援续验)。七执行源观测后至封存无漂移，但观测晚于 RN085 首轮开始，不反称其起始快照。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

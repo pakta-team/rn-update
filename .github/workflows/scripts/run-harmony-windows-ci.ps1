@@ -1,6 +1,6 @@
 <#
 [INPUT]: 依赖隔离 checkout、固定候选/HAR 摘要、显式 DevEco/WSL/HDC 与工程外签名文件
-[OUTPUT]: 在全新短工程中串行执行共享 Harmony 阶段，仅保存输入 JSON 与命令日志
+[OUTPUT]: 在两个全新短工程串行执行原九项及 healthy/crash 原生场景，隔离保存输入/日志/HAP
 [POS]: Windows 临时 runner 编排边界；不覆盖主工作树或已有签名工程，不注册 runner 或触发 Actions
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 #>
@@ -10,9 +10,10 @@ param([switch]$PlanOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
-$CandidateSha = '4818abacdfd97e308b80f8f8bbbb96ade221d58f1135e0a703d7b5069cc06cbf'
+$CandidateSha = '68abd9ffdb3a93f2b9df5ed3a893b01c77537c1b8d7ee9a154ba5c4cbc5937da'
 $HarSha = '92bb0c023ca9a4c2160a7ed20db8ea19bf7437b7eac8f2e64733f592935bc9ff'
-$ExpectedProject = 'D:\r\hw1115'
+$ExpectedProject = 'D:\r\hw1116'
+$ExpectedNativeProject = 'D:\r\hn1116'
 
 function Require-Environment([string]$Name) {
     $Value = [Environment]::GetEnvironmentVariable($Name)
@@ -53,12 +54,19 @@ if ($Repo -ne $ExpectedCheckout -or (Get-Item -LiteralPath $Repo).LinkType) {
 }
 $Project = Full-Path (Require-Environment 'RNU_HARMONY_PROJECT')
 if ($Project -ne $ExpectedProject -or (Is-Inside $Workspace $Project)) {
-    throw 'Harmony CI requires the dedicated external D:\r\hw1115 project'
+    throw 'Harmony CI requires the dedicated external D:\r\hw1116 project'
 }
 if (Test-Path -LiteralPath $Project) { throw 'Refusing to overwrite an existing Harmony project' }
+$NativeProject = Full-Path (Require-Environment 'RNU_HARMONY_NATIVE_PROJECT')
+if ($NativeProject -ne $ExpectedNativeProject -or (Is-Inside $Workspace $NativeProject) -or
+    $NativeProject -eq $Project) {
+    throw 'Native validation requires the separate external D:\r\hn1116 project'
+}
+if (Test-Path -LiteralPath $NativeProject) { throw 'Refusing to overwrite an existing native project' }
 $Signing = Full-Path (Require-Environment 'RNU_HARMONY_SIGNING_FILE')
 Require-PhysicalFile $Signing
-if ((Is-Inside $Workspace $Signing) -or (Is-Inside $Project $Signing)) {
+if ((Is-Inside $Workspace $Signing) -or (Is-Inside $Project $Signing) -or
+    (Is-Inside $NativeProject $Signing)) {
     throw 'Signing input must remain outside the checkout and target project'
 }
 $Candidate = Full-Path (Require-Environment 'RNU_HARMONY_SDK_TGZ')
@@ -83,9 +91,11 @@ foreach ($File in @('hvigorfile.ts', 'build-profile.json5', 'entry/build-profile
 }
 $Phases = @('stage', 'sync', 'prepare', 'base', 'build', 'diff', 'check', 'install', 'test')
 $Plan = [ordered]@{
-    checkout = $Repo; project = $Project; candidateSha256 = $CandidateSha; harSha256 = $HarSha
+    checkout = $Repo; project = $Project; nativeProject = $NativeProject
+    nativeVariants = @('healthy', 'crash'); candidateSha256 = $CandidateSha; harSha256 = $HarSha
     phases = $Phases; copySigning = 'external input to ignored signing.local.json5'
-    nodeDependencies = 'frozen locks; physical SDK copy'; artifactPolicy = 'explicit input JSON and logs only'
+    nodeDependencies = 'frozen locks; physical SDK copy'
+    artifactPolicy = 'explicit JSON/logs; native HAP separated by variant, no signing input upload'
 }
 if ($PlanOnly) { $Plan | ConvertTo-Json -Depth 4; exit 0 }
 
@@ -147,6 +157,14 @@ try {
     foreach ($Phase in @('prepare', 'base', 'build', 'diff', 'check', 'install', 'test')) {
         Invoke-Logged $Phase $E2e 'node' @($Entry, $Phase)
     }
+    # ---------- 原九项证据封存后才创建独立原生工程，两个场景按序运行 ----------
+    Copy-ProjectTree $SourceProject $NativeProject
+    Copy-Item -LiteralPath $Signing -Destination (Join-Path $NativeProject 'signing.local.json5')
+    $NativeEntry = Join-Path $E2e 'scripts/run-harmony-native-e2e.js'
+    $env:RNU_HARMONY_REUSE_DEPENDENCIES = '0'
+    Invoke-Logged 'native-healthy' $E2e 'node' @($NativeEntry, 'healthy', 'all')
+    $env:RNU_HARMONY_REUSE_DEPENDENCIES = '1'
+    Invoke-Logged 'native-crash' $E2e 'node' @($NativeEntry, 'crash', 'all')
 } finally {
     # 复用已有 PID 归属门卫，仅回收该 checkout 启动的 Harmony server。
     $Cleanup = "const p=require('node:path'); const s=require('./e2e/harmony/server-process'); s.stopServerFromPidFile(p.resolve('.e2e-artifacts/.server.harmony.pid')).then(()=>{}).catch(()=>process.exitCode=1);"

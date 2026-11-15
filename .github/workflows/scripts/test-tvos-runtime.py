@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 [INPUT]: 依赖 tvOS driver 的纯输入/删除边界与本地协议，不依赖 Xcode 或设备替身
-[OUTPUT]: 验证非测试应用、路径逃逸、链接、输入漂移和清理失败均不能伪造运行成功
+[OUTPUT]: 验证输入/删除边界、异步落盘重读与超时拒绝，不允许旧版本/回滚残留或缺失下载伪造成功
 [POS]: CI 安全门卫回归；不替代 tvOS 原生编译、simctl 或 JS/OTA 执行证据
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -26,6 +26,66 @@ spec.loader.exec_module(module)
 
 
 class SafetyTests(unittest.TestCase):
+    def test_purge_wait_reloads_the_actual_plist_after_delayed_persistence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            driver = module.Driver.__new__(module.Driver)
+            driver.data = Path(directory)
+            preferences = driver.data / "Library/Preferences" / (module.BUNDLE_ID + ".plist")
+            preferences.parent.mkdir(parents=True)
+            config = {"appKey": "tvos-runtime-validation"}
+            preferences.write_bytes(plistlib.dumps({module.CONFIG: json.dumps(config),
+                module.INFO: json.dumps({"currentVersion": module.VERSIONS["v2"]})}))
+            stale = preferences.read_bytes()
+
+            def persist(_delay):
+                self.assertEqual(preferences.read_bytes(), stale)
+                preferences.write_bytes(plistlib.dumps({module.CONFIG: json.dumps(config)}))
+
+            with patch.object(module.time, "monotonic", side_effect=[0, 0.1, 0.2]), \
+                    patch.object(module.time, "sleep", side_effect=persist) as sleep:
+                self.assertTrue(module.wait("persisted purge cleanup", driver.purge_cleanup_persisted, 1))
+            sleep.assert_called_once_with(0.5)
+            self.assertEqual(driver.state()["nativeConfig"], config)
+
+    def test_purge_wait_times_out_for_old_version_rollback_or_missing_preferences(self):
+        with tempfile.TemporaryDirectory() as directory:
+            driver = module.Driver.__new__(module.Driver)
+            driver.data = Path(directory)
+            preferences = driver.data / "Library/Preferences" / (module.BUNDLE_ID + ".plist")
+            preferences.parent.mkdir(parents=True)
+            configured = {module.CONFIG: json.dumps({"appKey": "tvos-runtime-validation"})}
+            cases = [
+                {**configured, module.INFO: json.dumps({"currentVersion": module.VERSIONS["v2"]})},
+                {**configured, "REACTNATIVECN_PAKTA_ROLLEDBACKMARKED_KEY": module.VERSIONS["v2"]},
+                {},
+                None,
+            ]
+            for defaults in cases:
+                with self.subTest(defaults=defaults):
+                    if defaults is None:
+                        preferences.unlink()
+                    else:
+                        preferences.write_bytes(plistlib.dumps(defaults))
+                    before = preferences.read_bytes() if preferences.exists() else None
+                    with patch.object(module.time, "monotonic", side_effect=[0, 0.1, 0.2, 2]), \
+                            patch.object(module.time, "sleep"):
+                        with self.assertRaisesRegex(RuntimeError, "Timed out waiting for persisted purge cleanup"):
+                            module.wait("persisted purge cleanup", driver.purge_cleanup_persisted, 1)
+                    self.assertEqual(preferences.read_bytes() if preferences.exists() else None, before)
+
+    def test_online_restore_requires_persisted_marker_and_post_purge_get(self):
+        driver = module.Driver.__new__(module.Driver)
+        driver.state = lambda: {"v2": {}}
+        driver.installed = lambda _version, _since: True
+        self.assertFalse(driver.purge_restore_persisted(123))
+        driver.state = lambda: {"v2": {"purgeRestore": True}}
+        driver.installed = lambda _version, _since: False
+        self.assertFalse(driver.purge_restore_persisted(123))
+        calls = []
+        driver.installed = lambda version, since: calls.append((version, since)) or True
+        self.assertTrue(driver.purge_restore_persisted(123))
+        self.assertEqual(calls, [("v2", 123)])
+
     def test_download_probe_allows_target_commit_but_activation_still_requires_health(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

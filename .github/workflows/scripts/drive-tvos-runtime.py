@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 [INPUT]: 依赖隔离 RN-tvos Release 宿主、当前 CLI、simctl 与 SDK 只读安装/defaults 状态
-[OUTPUT]: 验证真实 JS、原生 forceBoot 两版本、健康重启与缓存恢复；构造拒绝也留最终 app 身份诊断
+[OUTPUT]: 验证真实 JS、原生 forceBoot 两版本、健康重启与缓存恢复；有界等待 defaults 落盘，构造拒绝也留诊断
 [POS]: tvOS 设备验收驱动；服务只发版本响应，绝不写 SDK defaults、安装记录或版本目录
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -279,6 +279,16 @@ class Driver:
         return (info.get("currentVersion") == VERSIONS[version] and
                 info.get("isFirstLoadOK") is True and info.get("isFirstTime") is not True)
 
+    def purge_cleanup_persisted(self):
+        state = self.state()
+        # CFPreferences 异步写盘；配置必须保留，不能把 plist 暂缺误判为清理完成。
+        return (bool(state["nativeConfig"]) and
+                not state["info"].get("currentVersion") and not state["rollback"])
+
+    def purge_restore_persisted(self, since):
+        return (self.state()["v2"].get("purgeRestore") is True and
+                bool(self.installed("v2", since)))
+
     def installed(self, version, since):
         cache = safe_cache_directory(self.data)
         with self.protocol.lock:
@@ -394,9 +404,8 @@ class Driver:
         self.protocol.stage(None, "purge-no-update")
         self.purge("purge-fallback")
         fallback = self.launch("purged-base", "base")
-        state = self.state()
-        if state["info"].get("currentVersion") or state["rollback"]:
-            raise RuntimeError("Purged tvOS state did not forget missing versions cleanly")
+        wait("purged tvOS state cleanup persisted", self.purge_cleanup_persisted)
+        self.snapshot("purged-defaults-persisted")
         if fallback["metadata"].get("isFirstTime") is True:
             raise RuntimeError("Packaged fallback inherited update first-load state")
         stage = self.protocol.stage("v2", "force-redownload")
@@ -407,9 +416,9 @@ class Driver:
         since = time.time()
         self.purge("purge-online")
         restored = self.launch("online-restored-v2", "v2")
-        if (not self.state()["v2"].get("purgeRestore") or
-                not self.installed("v2", since)):
-            raise RuntimeError("Online launch did not record native purgeRestore")
+        wait("native purgeRestore persisted with actual GET",
+             lambda: self.purge_restore_persisted(since))
+        self.snapshot("online-restore-persisted")
         self.launch("online-persist-v2", "v2")
         self.report["onlineRestoreMetadata"] = restored["metadata"]
         self.assert_inputs_unchanged()

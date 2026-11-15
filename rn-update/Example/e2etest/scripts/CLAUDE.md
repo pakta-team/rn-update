@@ -23,10 +23,10 @@ harmony-e2e.test.js: Node 持久正负控，覆盖候选/安装身份、RN 隔�
 harmony-e2e-map.md: 可供本机和临时 Windows runner 共用的分阶段命令、候选环境变量与证据边界，明确 prepare→base→build→diff 顺序及设备测试串行使用端口。
 compile-node-ts.js: 将 TS hook 编译到临时目录并解析 Node 可执行入口
 create-rn077-oldarch-project.js: 校验显式本地 tgz 后生成 RN 0.77.3/CLI 15.0.1 宿主；复制完整 JS/Node 编译配置与候选，清除仓库外类型别名、重定位 Metro/CLI 到安装树，拒绝覆盖既有工程
-create-expo-e2e-project.js: 只生成fresh Expo57/RN0.86.3宿主，显式候选/摘要与可选源码输入，复用UI/版本/坏JS入口并记录源码摘要；安装、prebuild和Gradle由调用方执行
-assert-expo-e2e-project.js: prebuild后核对完整物理候选、Expo/RN/React单源、生成输入、标准ExpoReactHostFactory与仅10.0.2.2网络，不访问设备
+create-expo-e2e-project.js: 只生成fresh Expo57/RN0.86.3宿主，显式候选/摘要与可选源码输入，锁定直接Babel编译依赖并复用UI/版本/坏JS入口；安装、prebuild和Gradle由调用方执行
+assert-expo-e2e-project.js: prebuild后核对完整物理候选、Expo/RN/React单源、宿主直接Babel版本/物理入口解析、生成输入、标准ExpoReactHostFactory与仅10.0.2.2网络，不访问设备
 expo-e2e-network-plugin.js: 复制到隔离宿主的ConfigPlugin模板，重复prebuild固定Manifest/XML，默认禁明文、仅10.0.2.2例外，拒绝覆盖无关网络策略
-expo-e2e-project.test.js: fresh/错摘要/完整候选/第二依赖树/网络扩散/入口注入与插件重复执行的离线正负控，不代称Expo设备执行
+expo-e2e-project.test.js: fresh/错摘要/完整候选/第二依赖树/Babel仅嵌套于Expo或无入口/网络扩散/入口注入与插件重复执行的离线正负控，不代称Expo设备执行
 jest-runner-boundaries.test.js: 真实Jest --listTests断言普通Detox仅三套、Harmony native仅一套，防止新增平台目录误收集；不执行用例或设备
 assert-rn077-oldarch.js: 校验候选摘要、关键安装字节和 JS/native 同根；--release 强制宿主与 SDK BuildConfig 均为旧架构且 APK 存在
 rn077-runtime-proof.js: 生成宿主启动前验证 RN077、legacyBridge 与 NativeModules.Pakta 同一对象，拒绝 bridgeless/Turbo/Fabric

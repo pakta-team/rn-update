@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Node test/vm、真实共享 UI 与临时 SDK 候选/物理宿主夹具
- * [OUTPUT]: 持久验证 fresh 生成、完整候选、依赖单源、正常 Expo 入口和最小网络的正负控
+ * [OUTPUT]: 持久验证 fresh 生成、完整候选、框架单源/Babel根解析、正常 Expo 入口和最小网络的正负控
  * [POS]: Expo 生成器离线门卫；不下载依赖、不编译原生、不访问设备或冒充运行验收
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -14,6 +14,7 @@ const { test } = require('node:test');
 const {
   generateProject,
   VERSIONS,
+  BUILD_TOOLS,
   PACKAGE,
   digest,
 } = require('./create-expo-e2e-project');
@@ -88,6 +89,14 @@ function fixture(t, installed = true) {
         `node_modules/${name}/package.json`,
         JSON.stringify({ name, version })
       );
+    for (const [name, version] of Object.entries(BUILD_TOOLS)) {
+      write(
+        project,
+        `node_modules/${name}/package.json`,
+        JSON.stringify({ name, version, main: 'index.js' })
+      );
+      write(project, `node_modules/${name}/index.js`, 'module.exports = {};\n');
+    }
     write(project, 'package-lock.json', '{}\n');
     write(
       project,
@@ -122,6 +131,11 @@ test('fresh generation closes shared UI/entry/candidate inputs without running i
   assert(!fs.existsSync(path.join(options.project, 'android')));
   assert.match(read('index.js'), /registerRootComponent\(App\)/);
   assert.match(read('metro.config.js'), /expo\/metro-config/);
+  assert.deepEqual(
+    JSON.parse(read('package.json')).devDependencies,
+    BUILD_TOOLS
+  );
+  assert.match(read('babel.config.js'), /presets: \['babel-preset-expo'\]/);
   assert.doesNotMatch(
     read('index.js'),
     /setLocalHashInfo|probe\.bundle|getBundleUrl/
@@ -174,6 +188,64 @@ test('physical installed candidate and normal Expo Android prebuild pass the ind
   assert.equal(proof.status, 'validated');
   assert.equal(proof.candidate.files, 3);
   assert.equal(proof.dependencies['react-native'].version, '0.86.3');
+  assert.equal(proof.buildTools['babel-preset-expo'].version, '57.0.17');
+});
+
+test('Babel preset must be a pinned direct host dependency even when Expo declares it', (t) => {
+  const options = fixture(t);
+  const manifest = path.join(options.project, 'package.json');
+  const host = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+  delete host.devDependencies['babel-preset-expo'];
+  fs.writeFileSync(manifest, JSON.stringify(host));
+  write(
+    options.project,
+    'node_modules/expo/package.json',
+    JSON.stringify({
+      name: 'expo',
+      version: VERSIONS.expo,
+      dependencies: { 'babel-preset-expo': '~57.0.11' },
+    })
+  );
+  assert.throws(
+    () => assertExpoProject(options),
+    /Expected pinned babel-preset-expo/
+  );
+});
+
+test('Babel preset installed only inside Expo cannot pass the host root gate', (t) => {
+  const options = fixture(t);
+  const nested = path.join(options.project, 'node_modules/expo/node_modules');
+  fs.mkdirSync(nested);
+  fs.renameSync(
+    path.join(options.project, 'node_modules/babel-preset-expo'),
+    path.join(nested, 'babel-preset-expo')
+  );
+  assert.throws(
+    () => assertExpoProject(options),
+    /Cannot find module 'babel-preset-expo/
+  );
+});
+
+test('Babel build tools reject missing executable entries and installed version drift', (t) => {
+  const missing = fixture(t);
+  fs.unlinkSync(
+    path.join(missing.project, 'node_modules/@babel/core/index.js')
+  );
+  assert.throws(() => assertExpoProject(missing), /Cannot find module/);
+  const drifted = fixture(t);
+  write(
+    drifted.project,
+    'node_modules/babel-preset-expo/package.json',
+    JSON.stringify({
+      name: 'babel-preset-expo',
+      version: '0.0.0',
+      main: 'index.js',
+    })
+  );
+  assert.throws(
+    () => assertExpoProject(drifted),
+    /Installed babel-preset-expo version differs/
+  );
 });
 
 test('gate compares every candidate file including native bytes and binds an external digest', (t) => {

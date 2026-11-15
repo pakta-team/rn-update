@@ -27,6 +27,6 @@ tsconfig.json: 样例 TypeScript 编译边界
 tsconfig.node.json: Node 制品脚本与 global hooks 的 Node16 编译边界，由 RN077 生成器连同应用配置复制
 update.json: 本地更新服务使用的样例版本描述
 
-RN077 隔离宿主只消费显式本地 tgz，不沿用本工程的工作树 SDK 覆盖；生成器将 Metro/CLI 同时重定位到安装树，闭合 JS/Node 编译输入，并加入候选、双 BuildConfig 与运行时旧桥断言。当前候选的完整 core/native 设备证据与历史 smoke 分开登记，见 [RN077 地图](scripts/rn077-oldarch-map.md) 和 [设备矩阵](e2e/ANDROID_DEVICE_MATRIX.md)。Expo fresh 生成器复用共享 UI/版本/故障入口，只生成文件后由调用方安装与prebuild；完整候选/依赖单源门卫和仅10.0.2.2网络见 [Expo OTA 地图](scripts/expo-ota-map.md)。通用Detox runner明确排除独立Harmony native套件，RN077复制后保持同一发现边界。
+RN077 隔离宿主只消费显式本地 tgz，不沿用本工程的工作树 SDK 覆盖；生成器将 Metro/CLI 同时重定位到安装树，闭合 JS/Node 编译输入，并加入候选、双 BuildConfig 与运行时旧桥断言。当前候选的完整 core/native 设备证据与历史 smoke 分开登记，见 [RN077 地图](scripts/rn077-oldarch-map.md) 和 [设备矩阵](e2e/ANDROID_DEVICE_MATRIX.md)。Expo fresh 生成器复用共享 UI/版本/故障入口并锁定宿主直接Babel编译依赖，只生成文件后由调用方安装与prebuild；完整候选/框架单源/Babel根解析门卫和仅10.0.2.2网络见 [Expo OTA 地图](scripts/expo-ota-map.md)。通用Detox runner明确排除独立Harmony native套件，RN077复制后保持同一发现边界。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

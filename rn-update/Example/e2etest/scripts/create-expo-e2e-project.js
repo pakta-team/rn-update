@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * [INPUT]: 依赖显式本地 SDK tgz/摘要、e2etest UI/版本入口与隔离网络插件模板
- * [OUTPUT]: 提供 generateProject 与 CLI，创建 Expo57/RN0.86.3 的 fresh 消费宿主及输入证明
+ * [OUTPUT]: 提供 generateProject 与 CLI，创建锁定框架/Babel编译依赖的 Expo57/RN0.86.3 fresh 宿主及输入证明
  * [POS]: Expo 真 OTA/坏 JS 验收的工程边界；只生成文件，安装、prebuild、Gradle 由调用方逐步执行
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -12,6 +12,10 @@ const path = require('node:path');
 const { readCandidate } = require('../../../scripts/package-candidate');
 
 const VERSIONS = { expo: '57.0.22', react: '19.2.3', 'react-native': '0.86.3' };
+const BUILD_TOOLS = {
+  '@babel/core': '7.29.13',
+  'babel-preset-expo': '57.0.17',
+};
 const PACKAGE = 'space.yoghourt.pakta.expoprobe';
 const ENTRIES = [
   'entry.v1.ts',
@@ -104,6 +108,7 @@ function generateProject({
       ...VERSIONS,
       'rn-update': 'file:./rn-update-candidate.tgz',
     },
+    devDependencies: BUILD_TOOLS,
     engines: { node: '>=22' },
   });
   json('app.json', {
@@ -160,7 +165,7 @@ function generateProject({
   );
   write(
     'CLAUDE.md',
-    '# PaktaExpoProbe - Expo 隔离验收宿主\nExpo57.0.22 + React19.2.3 + RN0.86.3 + 显式本地SDK候选\n\nsrc/ - 共享样例UI；e2e/ - 版本与故障入口；scripts/ - 本地服务；plugins/ - 仅10.0.2.2测试网络。\n\npackage.json/package-lock.json固定安装输入，expo-e2e-project.json记录候选与复制源码摘要；index.js使用registerRootComponent，不写原生更新状态。\n\n[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md\n'
+    '# PaktaExpoProbe - Expo 隔离验收宿主\nExpo57.0.22 + React19.2.3 + RN0.86.3 + Babel7.29.13/preset57.0.17 + 显式本地SDK候选\n\nsrc/ - 共享样例UI；e2e/ - 版本与故障入口；scripts/ - 本地服务；plugins/ - 仅10.0.2.2测试网络。\n\npackage.json/package-lock.json固定框架和宿主直接Babel编译依赖，expo-e2e-project.json记录候选与复制源码摘要；index.js使用registerRootComponent，不写原生更新状态。\n\n[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md\n'
   );
   for (const [directory, members] of Object.entries({
     e2e: [
@@ -182,6 +187,7 @@ function generateProject({
     source: sourceRoot,
     package: PACKAGE,
     versions: VERSIONS,
+    buildTools: BUILD_TOOLS,
     candidate: {
       version: candidate.metadata.version,
       sha256: candidate.sha256,
@@ -212,4 +218,4 @@ if (require.main === module) {
   }
   generateProject(options);
 }
-module.exports = { generateProject, VERSIONS, PACKAGE, digest };
+module.exports = { generateProject, VERSIONS, BUILD_TOOLS, PACKAGE, digest };

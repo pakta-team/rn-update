@@ -32,7 +32,7 @@ E2E_PLATFORM=android detox test --configuration android.emu.release --headless -
 
 持久离线回归：`npm run test:rn077-generator`。真实验证与未验范围见 [RN077 地图](scripts/rn077-oldarch-map.md)；这里提供 Detox 命令不代表该矩阵已经通过。
 
-Expo57/RN0.86.3 使用 [Expo 隔离宿主入口](scripts/expo-ota-map.md)：`create-expo-e2e-project.js --project FRESH_DIR --sdk-tarball CANDIDATE.tgz --sdk-sha256 SHA256` 只创建工程，随后显式执行正常 npm 安装、Expo prebuild、`assert-expo-e2e-project.js --project FRESH_DIR --sdk-sha256 SHA256` 和 Release 构建。宿主注册共享UI，完整候选和框架必须物理单源；明文网络仅允许10.0.2.2。样例目录的 `npm run test:expo-generator` 运行离线输入正负控，`npm run test:runner-boundaries` 用真实 Jest 发现列表检查普通Detox与独立Harmony native套件隔离。
+Expo57/RN0.86.3 使用 [Expo 隔离宿主入口](scripts/expo-ota-map.md)：`create-expo-e2e-project.js --project FRESH_DIR --sdk-tarball CANDIDATE.tgz --sdk-sha256 SHA256` 只创建工程，随后显式执行正常 npm 安装、Expo prebuild、`assert-expo-e2e-project.js --project FRESH_DIR --sdk-sha256 SHA256` 和 Release 构建。宿主注册共享UI，完整候选和框架必须物理单源；Babel core/preset为锁定的直接开发依赖，门卫要求从宿主根解析实际入口；明文网络仅允许10.0.2.2。样例目录的 `npm run test:expo-generator` 运行离线输入正负控，`npm run test:runner-boundaries` 用真实 Jest 发现列表检查普通Detox与独立Harmony native套件隔离。
 
 Android 的 package diff 走 `PackageInstaller`，宿主清单声明
 `REQUEST_INSTALL_PACKAGES`；因此 release APK、pdiff 和重启后的 bundle 状态都在同一条链上验收。

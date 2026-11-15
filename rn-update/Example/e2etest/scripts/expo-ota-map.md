@@ -30,11 +30,11 @@ node (Join-Path $E2e 'scripts\assert-expo-e2e-project.js') --project $ExpoHost -
 
 ## 复用 UI 与限定测试网络
 
-生成器复制 `src`、`localUpdateConfig.ts`、v1–v4、brick/fix/rescue-fix 入口，根 `index.js` 使用 Expo `registerRootComponent`，Metro/Babel 使用宿主 Expo 配置。SDK 仅安装工程内 `rn-update-candidate.tgz`，不引用工作树包或 registry SDK。
+生成器复制 `src`、`localUpdateConfig.ts`、v1–v4、brick/fix/rescue-fix 入口，根 `index.js` 使用 Expo `registerRootComponent`，Metro/Babel 使用宿主 Expo 配置。宿主直接开发依赖固定 `@babel/core@7.29.13` 与 `babel-preset-expo@57.0.17`，后者满足 Expo57.0.22 自身的 `~57.0.11` 依赖范围；自定义 `babel.config.js` 从宿主根解析 preset，不能依赖 npm 将 Expo 内部依赖提升。SDK 仅安装工程内 `rn-update-candidate.tgz`，不引用工作树包或 registry SDK。
 
 本地 `plugins/with-e2e-network.js` 在每次 prebuild 中固定 Manifest 与 XML：默认禁明文，仅 `10.0.2.2` 且不含子域例外。它不修改 SDK 或 `expoUsePakta` 的默认网络策略，遇到无关已有 networkSecurityConfig 时拒绝覆盖。标准 MainApplication 保留 ExpoReactHostFactory 与 ApplicationLifecycleDispatcher，不写 nativeConfig/currentHash、不携带 probe.bundle；Expo57 不支持旧架构。
 
-`assert-expo-e2e-project.js` 要求物理安装、全部 tgz 文件字节一致、React/RN/Expo 从应用和 SDK 解析到同一宿主目录，核对生成源码与正常 Expo 原生入口，并保存 `expo-e2e-validation.json`。该证明只覆盖输入与 prebuild，不等于 Gradle 或设备通过。`npm run test:expo-generator` 为离线正负控，长期 CI 使用同 run 四 ABI/声明打包候选；旧候选的设备结果不绑定新的生产修复。
+`assert-expo-e2e-project.js` 要求物理安装、全部 tgz 文件字节一致、React/RN/Expo 从应用和 SDK 解析到同一宿主目录；两个 Babel 直接开发依赖必须版本相符且实际入口位于宿主根安装树，只有 Expo 内部嵌套 preset 或只有 package.json 均拒绝。门卫核对生成源码与正常 Expo 原生入口，并保存 `expo-e2e-validation.json`。该证明只覆盖输入与 prebuild，不等于 Babel 转译、Gradle 或设备通过。`npm run test:expo-generator` 为离线正负控，长期 CI 使用同 run 四 ABI/声明打包候选；旧候选的设备结果不绑定新的生产修复。
 
 ## 构建与真实制品
 
@@ -92,5 +92,11 @@ python (Join-Path $E2e 'scripts\drive-expo-update-ui.py') --project-root $ExpoHo
 新的 `TEMP/px1115` 由仓内生成器以旧 `4818abac…` 候选真实创建，正常 `npm install` 安装476包，`npm ls --all --json` 退出0；本机 Expo prebuild 及重复 prebuild 均成功。独立门卫确认全部900份候选文件、19份复制源码、Expo57.0.22/React19.2.3/RN0.86.3单源、标准原生宿主及仅10.0.2.2网络，保存工程证明、安装锁/依赖树、工具版本和原始日志。首个较长目录 `TEMP/pakta-expo-generator-20261115-fresh` 的 npm 连接重置原始日志另存，未裁剪或拼接依赖树。本轮没有执行Gradle或设备，不把生成器输入验证记为后续Expo生产异常处理修复的候选验收。
 
 生成器离线9项正负控通过；真实Jest `--listTests` 确认普通Detox仅三套、独立Harmony native仅一套，连同RN077复制配置等3项回归共5项通过，均零skip。远程发现的误收集通过普通runner显式排除 `e2e/harmony-native/` 修复，独立套件继续保留其variant契约。以上不替代重跑远程设备job。
+
+## 2026-11-15 fresh CI Babel 依赖收尾
+
+隔离快照 `f460` 的 Expo 设备 job `132705153751` 在 `:app:createBundleReleaseJsAndAssets` 实际失败：`Cannot find module 'babel-preset-expo'`，后续 `transformFile` 错误是 transformer 未创建的结果。此前 npm 与 prebuild 通过只证明安装和原生工程生成；它们没有执行自定义 Babel 配置。`TEMP/px1115` 独立重现同一依赖边界：宿主根解析失败，Expo 自身目录可解析嵌套的57.0.17。因此生成器新增上述两个直接编译依赖，构建前门卫和三条持久正负控覆盖缺显式依赖、仅嵌套安装、缺入口和版本漂移；现有回归共12项全部通过、0 skip。
+
+在保留旧 package/安装锁/验证证明后，对既有 `px1115` 正常执行精确版本 npm 安装，新增1包/移除1包，`npm ls --all --json` 退出0。新门卫确认原4818候选全部900文件和框架单源不变，Babel两入口均从宿主根物理解析；宿主真实 Babel 使用 production Android caller 分别成功转译 `index.js`、`src/index.tsx` 与 `e2e/entry.brick.ts`。原始失败解析、前后安装输入和转译证明保存在 `TEMP/pakta-expo-babel-20261115`。这次仅修生成器/门卫，不改SDK生产源或68ab候选，不启动Metro完整依赖图、Gradle或设备；远程设备job仍需以新快照重跑。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

@@ -111,8 +111,8 @@ fs.writeFileSync(path.join(destination, 'ios/Info.plist'), `<?xml version="1.0" 
 <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-<key>CFBundleShortVersionString</key><string>1.0.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+<key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
 </dict></plist>
 `);
@@ -171,6 +171,8 @@ target.source_build_phase.add_file_reference(project.main_group.new_file('SwiftR
 target.build_configurations.each do |config|
   config.build_settings.merge!({
     'PRODUCT_BUNDLE_IDENTIFIER' => 'space.yoghourt.pakta.tvvalidation',
+    'MARKETING_VERSION' => '1.0.0',
+    'CURRENT_PROJECT_VERSION' => '1',
     'GENERATE_INFOPLIST_FILE' => 'YES',
     'INFOPLIST_FILE' => 'Info.plist',
     'INFOPLIST_KEY_UILaunchScreen_Generation' => 'YES',

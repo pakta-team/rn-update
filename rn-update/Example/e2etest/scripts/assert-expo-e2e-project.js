@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * [INPUT]: 依赖生成证明、显式候选摘要、宿主物理安装树与 Expo prebuild 结果
- * [OUTPUT]: 提供 assertExpoProject 与 CLI，验证完整候选、框架单源、正常原生入口和限定网络
+ * [OUTPUT]: 提供 assertExpoProject 与 CLI，验证完整候选、框架单源、Babel根依赖解析、正常原生入口和限定网络
  * [POS]: Expo 隔离宿主的构建前门卫；不安装依赖、不访问设备、不把校验代称运行通过
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -11,7 +11,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { readCandidate } = require('../../../scripts/package-candidate');
-const { VERSIONS, PACKAGE, digest } = require('./create-expo-e2e-project');
+const {
+  VERSIONS,
+  BUILD_TOOLS,
+  PACKAGE,
+  digest,
+} = require('./create-expo-e2e-project');
 
 function assertExpoProject({ project, sha256 } = {}) {
   assert(project && sha256, '--project and --sdk-sha256 are required');
@@ -62,9 +67,8 @@ function assertExpoProject({ project, sha256 } = {}) {
     sdk,
     'SDK must be a physical install inside the host'
   );
-  const dependencies = {};
-  for (const [name, version] of Object.entries(VERSIONS)) {
-    assert.equal(host.dependencies[name], version, `Expected pinned ${name}`);
+  function hostDependency(name, version, section) {
+    assert.equal(host[section]?.[name], version, `Expected pinned ${name}`);
     const resolved = fs.realpathSync(
       require.resolve(`${name}/package.json`, { paths: [root] })
     );
@@ -74,18 +78,39 @@ function assertExpoProject({ project, sha256 } = {}) {
       `${name} must resolve inside the host`
     );
     assert.equal(
-      fs.realpathSync(
-        require.resolve(`${name}/package.json`, { paths: [sdk] })
-      ),
-      resolved,
-      `${name} must resolve from one host tree for SDK and app`
-    );
-    assert.equal(
       JSON.parse(fs.readFileSync(resolved, 'utf8')).version,
       version,
       `Installed ${name} version differs`
     );
-    dependencies[name] = { version, package: resolved };
+    return { version, package: resolved };
+  }
+  const dependencies = {};
+  for (const [name, version] of Object.entries(VERSIONS)) {
+    const installed = hostDependency(name, version, 'dependencies');
+    assert.equal(
+      fs.realpathSync(
+        require.resolve(`${name}/package.json`, { paths: [sdk] })
+      ),
+      installed.package,
+      `${name} must resolve from one host tree for SDK and app`
+    );
+    dependencies[name] = installed;
+  }
+  // ---------- Babel配置从宿主根解析preset；Expo内部嵌套依赖不能代替直接编译输入 ----------
+  const buildTools = {};
+  for (const [name, version] of Object.entries(BUILD_TOOLS)) {
+    const installed = hostDependency(name, version, 'devDependencies');
+    const entry = require.resolve(name, { paths: [root] });
+    assert.equal(
+      fs.realpathSync(entry),
+      entry,
+      `${name} entry must be physical`
+    );
+    assert(
+      entry.startsWith(path.join(modules, name) + path.sep),
+      `${name} entry must resolve inside the host package`
+    );
+    buildTools[name] = { ...installed, entry };
   }
   for (const [name, expected] of Object.entries({
     ...proof.sourceFiles,
@@ -176,9 +201,10 @@ function assertExpoProject({ project, sha256 } = {}) {
     package: PACKAGE,
     candidate: proof.candidate,
     dependencies,
+    buildTools,
     sourceFiles: Object.keys(proof.sourceFiles).length,
     scope:
-      'installed candidate and generated Expo Android host; no build or device claim',
+      'installed candidate, host Babel entry resolution and generated Expo Android host; no build or device claim',
   };
   return result;
 }

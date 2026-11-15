@@ -28,15 +28,24 @@ Hdp_Files := \
 LOCAL_SRC_FILES := \
 	../../cpp/patch_core/archive_patch_core.cpp \
 	../../cpp/patch_core/digest.cpp \
+	../../cpp/patch_core/install_record.cpp \
+	../../cpp/patch_core/archive_limits.cpp \
+	../../cpp/patch_core/patch_manifest.cpp \
+	native_install_jni.cpp \
 	../../cpp/patch_core/hbc_transform.cpp \
 	../../cpp/patch_core/hbc_transform_wire.cpp \
 	../../cpp/patch_core/patch_core.cpp \
 	../../cpp/patch_core/patch_core_android.cpp \
 	../../cpp/patch_core/state_core.cpp \
+	../../cpp/patch_core/resume_plan.cpp \
+	../../cpp/patch_core/resume_plan_android.cpp \
 	../../cpp/patch_core/update_core_android.cpp \
 	../../cpp/update_flow_core/flow_json.cpp \
 	../../cpp/update_flow_core/update_flow_core.cpp \
-	../../cpp/update_flow_core/update_flow_jni.cpp \
+	../../cpp/update_flow_core/native_config.cpp \
+	../../cpp/update_flow_core/native_round.cpp \
+	../../cpp/update_flow_core/round_engine.cpp \
+	native_round_jni.cpp \
 	$(Hdp_Files)
 
 include $(BUILD_SHARED_LIBRARY)

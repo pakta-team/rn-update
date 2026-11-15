@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 ReactContextBaseJavaModule/ReactMethod、UpdateContext、UpdateEventEmitter 与共享 UpdateModuleImpl 的版本绑定成功确认
+ * [INPUT]: 依赖本地生成的 NativePaktaSpec、UpdateContext 与共享 UpdateModuleImpl 的版本绑定成功确认
  * [OUTPUT]: 对外提供旧架构 UpdateModule，暴露统一 Promise 版 Pakta API、markSuccess(expectedHash) 及常量
  * [POS]: Android 传统桥薄适配器，保持与 Codegen 桥同一调用形状并把全部更新行为委托 main 源集
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -8,7 +8,6 @@ package cn.reactnative.modules.update;
 
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
-import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
 import java.util.Map;
@@ -19,7 +18,7 @@ import java.util.Map;
  * Promise, like the TurboModule spec, so a failed persistence rejects instead
  * of resolving early (CODE_AUDIT 2.3).
  */
-public class UpdateModule extends ReactContextBaseJavaModule {
+public class UpdateModule extends NativePaktaSpec {
     private final UpdateModuleImpl impl;
 
     public UpdateModule(ReactApplicationContext reactContext, UpdateContext updateContext) {

@@ -2,8 +2,8 @@ package cn.reactnative.modules.update;
 
 /**
  * [INPUT]: 依赖 NativeUpdateConfig 归一化、NativeCheckOrchestrator.checkAndUpdate 编排、UpdateContext.setNativeConfig、BuildConfig.DEBUG 门与 Handler/Looper 主线程回调
- * [OUTPUT]: 对外提供静态 configure(Context, JSONObject, ConfigurationCallback) 与 checkAndUpdate(Context, Callback) 两个无桥宿主 API
- * [POS]: Android 宿主直连的桥外门面；WORKER/CONFIG_WORKER 双守护单线程隔离配置与检查轮，回调一律回主线程，异常折叠为 FAILED/CANCELLED 快照
+ * [OUTPUT]: 对外提供静态 configure 与 checkAndUpdate 无桥宿主 API；checkAndUpdate 可指定仅约束调用方等待的 timeoutMillis，旧签名默认 30 分钟
+ * [POS]: Android 宿主直连的桥外门面；配置单线程与宿主并发等待池隔离，各调用独立计时，回调一律回主线程，超时不取消共享检查轮
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import android.content.Context;
@@ -23,9 +23,8 @@ public final class PaktaNativeUpdate {
         void onComplete(NativeUpdateResult result);
     }
 
-    // A single waiting worker, not one thread per caller. The actual round is
-    // shared with cold start and crash rescue by NativeCheckOrchestrator.
-    private static final Executor WORKER = Executors.newSingleThreadExecutor(new ThreadFactory() {
+    // 等待线程可复用且互不排队，短期限调用不能被较早的长等待阻塞。
+    private static final Executor WORKER = Executors.newCachedThreadPool(new ThreadFactory() {
         @Override
         public Thread newThread(Runnable runnable) {
             Thread thread = new Thread(runnable, "pakta-host-check");
@@ -98,6 +97,14 @@ public final class PaktaNativeUpdate {
      * Missing persisted configuration and debug builds are reported as skipped.
      */
     public static void checkAndUpdate(Context context, final Callback callback) {
+        checkAndUpdate(context, NativeCheckOrchestrator.DEFAULT_HOST_TIMEOUT_MS, callback);
+    }
+
+    /**
+     * 期限只限制本调用等待；failed/timeout 不表示共享轮次失败或取消。
+     * 轮次继续为下次启动准备版本，提交仍须通过配置/reset 代际门卫。
+     */
+    public static void checkAndUpdate(Context context, final long timeoutMillis, final Callback callback) {
         if (context == null || callback == null) {
             throw new IllegalArgumentException("context and callback are required");
         }
@@ -111,7 +118,7 @@ public final class PaktaNativeUpdate {
                         outcome = NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "debug");
                     } else {
                         outcome = NativeCheckOrchestrator.checkAndUpdate(
-                            UpdateContext.getInstance(applicationContext));
+                            UpdateContext.getInstance(applicationContext), timeoutMillis);
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();

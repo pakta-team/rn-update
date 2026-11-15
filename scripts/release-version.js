@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 /**
- * [INPUT]: 依赖显式 SemVer、rn-update-cli/rn-update package.json 与 Harmony HAR 元数据
- * [OUTPUT]: 统一写入两个 npm 包及 Harmony HAR 的发布版本；--check 只读校验版本同构
- * [POS]: scripts 的版本事实同步入口，以 patch-worker 实际消费的 rn-update-cli 为默认来源，供本地发版与 Docker 构建前守门，不修改示例应用版本
+ * [INPUT]: 依赖显式 SemVer、本仓库 package.json 与 Harmony HAR 元数据
+ * [OUTPUT]: 统一写入 SDK 与 Harmony HAR 的发布版本；--check 只读校验版本同构
+ * [POS]: 独立 SDK 仓库的版本入口，以本仓库 package.json 为事实源，不读写兄弟 CLI 或示例应用
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
 
-const repoRoot = path.resolve(__dirname, '../..');
+const repoRoot = path.resolve(__dirname, '..');
 const semverPattern =
   /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-const versionSource = 'rn-update-cli/package.json';
-const packageFiles = ['rn-update/package.json', 'rn-update-cli/package.json'];
-const harmonyPackagePath = 'rn-update/harmony/pakta/oh-package.json5';
-const buildProfilePath = 'rn-update/harmony/pakta/BuildProfile.ets';
+const versionSource = 'package.json';
+const packageFiles = ['package.json'];
+const harmonyPackagePath = 'harmony/pakta/oh-package.json5';
+const buildProfilePath = 'harmony/pakta/BuildProfile.ets';
 const harmonyPackageVersionPattern =
   /^([ \t]*version[ \t]*:[ \t]*['"])([^'"]+)(['"][ \t]*,?[ \t]*)(?=\r?$)/m;
 const buildProfileVersionPattern =

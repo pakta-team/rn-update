@@ -1,15 +1,19 @@
 /**
- * [INPUT]: 依赖 Android Context/SharedPreferences/包信息、DownloadTask 单线程队列、patch_core 状态机 JNI 与原生检查编排器
- * [OUTPUT]: 对外提供 UpdateContext 单例、下载/切包、按启动版本身份确认成功、回滚/重置、bundle URL/hash、KV 与提交代际能力；新增 synchronized setNativeConfig(String)（预检 UUID 配置、推进 nativeConfigGeneration、失效响应缓存并重置 JS 检查标记）
+ * [INPUT]: 依赖 Android Context/SharedPreferences/包信息、DownloadTask 单线程队列、patch_core 状态机 JNI 与原生检查编排器；状态操作码由 scripts/contract.json 派生，持久化与清理不参与生成
+ * [OUTPUT]: 对外提供 UpdateContext 单例、下载/切包、按启动版本身份确认成功、回滚/重置、bundle URL/hash、KV 与提交代际能力；配置写入和 snapshotNativeRound 共用 commitLock，保证轮次配置与 reset/config 双代际属于同一时刻
  * [POS]: Android 更新聚合上下文和持久状态权威，协调磁盘事务、启动选择与救砖提交，桥层与 PaktaNativeUpdate 只通过它发起用例
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 package cn.reactnative.modules.update;
 
+import android.app.Activity;
+import android.app.ActivityManager;
+import android.app.Application;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.os.Bundle;
 import android.util.Log;
 import androidx.annotation.Nullable;
 import com.facebook.react.ReactInstanceManager;
@@ -47,6 +51,8 @@ public class UpdateContext {
     // Written on the launch path, read from executor/JS threads.
     private volatile boolean isUsingBundleUrl;
     private volatile boolean ignoreRollback;
+    // Guarded by commitLock: the callback that starts a deferred first load.
+    private Application.ActivityLifecycleCallbacks firstLoadStarter;
     // The version whose bundle this process actually loaded (resolved in
     // getBundleUrl). resetToPackagedBundle must not delete its directory:
     // update assets (images/fonts) are read from it on demand at runtime, so
@@ -105,7 +111,7 @@ public class UpdateContext {
         boolean flagB
     );
 
-    private UpdateContext(Context context) {
+    UpdateContext(Context context) {
         this.context = context.getApplicationContext();
         this.executor = Executors.newSingleThreadExecutor(new ThreadFactory() {
             @Override
@@ -151,16 +157,7 @@ public class UpdateContext {
             // Execute cleanUp before clearing SharedPreferences to avoid race condition
             this.cleanUp();
             SharedPreferences.Editor editor = this.sp.edit();
-            if (channelChanged) {
-                for (String key : sp.getAll().keySet()) {
-                    if (key.startsWith("hash_")) {
-                        editor.remove(key);
-                    }
-                }
-                editor.remove(NativeCheckOrchestrator.KEY_RESP_CACHE);
-            } else {
-                editor.clear();
-            }
+            clearVersionScopedState(editor);
             applyState(editor, nextState);
             editor.putString(KEY_BINARY_CHANNEL, channel);
             persistEditor(editor, "sync state with binary version");
@@ -432,6 +429,16 @@ public class UpdateContext {
         }
     }
 
+    private void clearVersionScopedState(SharedPreferences.Editor editor) {
+        editor.remove(KEY_FIRST_LOAD_MARKED);
+        editor.remove(NativeCheckOrchestrator.KEY_RESP_CACHE);
+        for (String key : sp.getAll().keySet()) {
+            if (key.startsWith("hash_")) {
+                editor.remove(key);
+            }
+        }
+    }
+
     private void applyState(SharedPreferences.Editor editor, StateCoreResult state) {
         putNullableString(editor, "packageVersion", state.packageVersion);
         putNullableString(editor, "buildTime", state.buildTime);
@@ -476,7 +483,7 @@ public class UpdateContext {
      * decides whether a markerless directory is grandfathered; a concurrent
      * commit cannot make an unverified directory pass.
      */
-    private void verifySwitchTarget(String hash) {
+    private InstallRecord.Activation verifySwitchTarget(String hash) {
         if (!UpdateFileUtils.isSafePathComponent(hash)) {
             throw new IllegalArgumentException("Invalid hash: " + hash);
         }
@@ -485,25 +492,54 @@ public class UpdateContext {
         if (!bundleFile.isFile()) {
             throw new IllegalStateException("Bundle version " + hash + " not found.");
         }
-        StateCoreResult currentState = getStateSnapshot();
-        boolean isLegacyActivatedVersion = hash.equals(currentState.currentVersion)
-            || hash.equals(currentState.lastVersion);
-        if (isLegacyActivatedVersion) {
-            // Versions activated before completion markers were introduced are
-            // explicitly grandfathered through current/last state.
-            return;
+        final boolean isLegacyActivatedVersion;
+        synchronized (commitLock) {
+            StateCoreResult currentState = getStateSnapshot();
+            isLegacyActivatedVersion = hash.equals(currentState.currentVersion)
+                || hash.equals(currentState.lastVersion);
         }
-        if (!InstallRecord.isComplete(versionDir, hash)) {
-            // An arbitrary markerless directory may be a crash-left partial
-            // install.
-            throw new IllegalStateException("Bundle version " + hash + " is incomplete.");
-        }
-        // The record's bundle digest must match the bytes on disk before
-        // the next launch is pointed at them.
         try {
-            InstallRecord.verifyForActivation(versionDir, hash, bundleFile);
+            return InstallRecord.checkActivation(versionDir, hash, bundleFile, isLegacyActivatedVersion);
         } catch (IOException e) {
             throw new IllegalStateException(e.getMessage(), e);
+        }
+    }
+
+    private void assertSwitchUnchanged(String hash, InstallRecord.Activation snapshot) {
+        StateCoreResult state = getStateSnapshot();
+        try {
+            snapshot.assertUnchanged(hash.equals(state.currentVersion) || hash.equals(state.lastVersion));
+        } catch (IOException e) {
+            throw new IllegalStateException(e.getMessage(), e);
+        }
+    }
+
+    interface InstallGuard {
+        void check() throws IOException;
+    }
+
+    static void promoteInstalledVersion(File staging, File directory, String hash, InstallGuard guard)
+        throws IOException {
+        synchronized (versionFilesLock) {
+            try (InstallRecord.Activation snapshot = InstallRecord.checkActivation(staging, hash,
+                    new File(staging, "index.bundlejs"), false)) {
+            synchronized (commitLock) {
+                guard.check();
+                snapshot.assertUnchanged(false);
+                if (hash.equals(runningVersion())) {
+                    throw new FileOperationException("Running version cannot be replaced");
+                }
+                UpdateContext instance = sInstance;
+                if (instance != null) {
+                    StateCoreResult state = instance.getStateSnapshot();
+                    if (hash.equals(state.currentVersion) || hash.equals(state.lastVersion)) {
+                        throw new FileOperationException("Activated version cannot be replaced");
+                    }
+                }
+                if (directory.exists()) UpdateFileUtils.removeDirectory(directory);
+                InstallRecord.promote(staging, directory);
+            }
+            }
         }
     }
 
@@ -524,13 +560,20 @@ public class UpdateContext {
 
     public void switchVersion(String hash) {
         synchronized (versionFilesLock) {
-            verifySwitchTarget(hash);
-            synchronized (commitLock) {
-                StateCoreResult nextState = computeSwitchState(hash);
-                SharedPreferences.Editor editor = sp.edit();
-                applyState(editor, nextState);
-                persistEditorOrThrow(editor, "switch version");
-                ignoreRollback = false;
+            long generation = getResetGeneration();
+            long configGeneration = getNativeConfigGeneration();
+            try (InstallRecord.Activation snapshot = verifySwitchTarget(hash)) {
+                synchronized (commitLock) {
+                    if (generation != getResetGeneration() || configGeneration != getNativeConfigGeneration()) {
+                        throw new IllegalStateException("Activation invalidated while verifying");
+                    }
+                    StateCoreResult nextState = computeSwitchState(hash);
+                    SharedPreferences.Editor editor = sp.edit();
+                    applyState(editor, nextState);
+                    assertSwitchUnchanged(hash, snapshot);
+                    persistEditorOrThrow(editor, "switch version");
+                    ignoreRollback = false;
+                }
             }
         }
     }
@@ -657,8 +700,6 @@ public class UpdateContext {
      * (so the next launch resolves to the built-in bundle) and delete the
      * downloaded versions, keeping only the directory of the version this
      * process is running from (a silent reset must not break its on-demand
-     * asset loads). Only the client uuid survives — it identifies the install
-     * for gray release bucketing and must not change on reset.
      */
     public void resetToPackagedBundle() {
         synchronized (commitLock) {
@@ -676,17 +717,12 @@ public class UpdateContext {
         resetState.buildTime = getBuildTime();
         resetState.firstTime = false;
         resetState.firstTimeOk = true;
-        String uuid = sp.getString("uuid", null);
         SharedPreferences.Editor editor = sp.edit();
-        editor.clear();
+        clearVersionScopedState(editor);
         applyState(editor, resetState);
-        if (uuid != null) {
-            editor.putString("uuid", uuid);
-        }
+        editor.putString(KEY_BINARY_CHANNEL, getChannel());
         persistEditorOrThrow(editor, "reset to packaged bundle");
         ignoreRollback = false;
-        // editor.clear() above already dropped the cached check response; it
-        // still advertised the version this reset removed.
         Log.i(TAG, "Reset to packaged bundle");
 
         DownloadTaskParams params = new DownloadTaskParams();
@@ -746,12 +782,13 @@ public class UpdateContext {
             // commitLock.
             synchronized (commitLock) {
                 StateCoreResult currentState = getStateSnapshot();
+                boolean deferFirstLoad = currentState.firstTime && !isProcessForeground();
                 StateCoreResult launchState = runStateCore(
                     STATE_OP_RESOLVE_LAUNCH,
                     currentState,
                     null,
                     ignoreRollback,
-                    true
+                    !deferFirstLoad
                 );
                 nativeCheckRolledBackVersion = launchState.rolledBackVersion;
                 if (launchState.didRollback) {
@@ -772,6 +809,17 @@ public class UpdateContext {
                 if (launchState.consumedFirstTime) {
                     // bundleURL may be resolved multiple times in one process.
                     ignoreRollback = true;
+                }
+                if (deferFirstLoad) {
+                    // JS reads the marker once per load: if the user opens the
+                    // app while this instance is alive, its markSuccess has to
+                    // work.
+                    SharedPreferences.Editor editor = sp.edit();
+                    editor.putBoolean(KEY_FIRST_LOAD_MARKED, true);
+                    persistEditor(editor, "defer first load");
+                    startFirstLoadWithFirstActivity();
+                    Log.i(TAG, "Started without UI, first load of "
+                        + currentState.currentVersion + " is not counted");
                 }
 
                 String currentVersion = launchState.loadVersion;
@@ -807,6 +855,76 @@ public class UpdateContext {
         }
     }
 
+    /**
+     * A start without UI (push message, HeadlessJS task, alarm, boot receiver)
+     * creates the RN instance but mounts no UpdateProvider, so it can never
+     * mark success. It must not use up the new version's first load, or the
+     * next launch rolls back a version that never failed.
+     */
+    boolean isProcessForeground() {
+        ActivityManager.RunningAppProcessInfo info = new ActivityManager.RunningAppProcessInfo();
+        ActivityManager.getMyMemoryState(info);
+        return info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
+    }
+
+    /**
+     * Importance can read as background on a launch that does show UI (screen
+     * off, the host created early in Application.onCreate), and a version that
+     * crashes there must still be rolled back. So the first activity started in
+     * this process starts the deferred first load.
+     */
+    private void startFirstLoadWithFirstActivity() {
+        if (firstLoadStarter != null || !(context instanceof Application)) {
+            return;
+        }
+        final Application application = (Application) context;
+        firstLoadStarter = new Application.ActivityLifecycleCallbacks() {
+            @Override
+            public void onActivityStarted(Activity activity) {
+                application.unregisterActivityLifecycleCallbacks(this);
+                startDeferredFirstLoad();
+            }
+
+            @Override
+            public void onActivityCreated(Activity activity, Bundle savedInstanceState) {}
+
+            @Override
+            public void onActivityResumed(Activity activity) {}
+
+            @Override
+            public void onActivityPaused(Activity activity) {}
+
+            @Override
+            public void onActivityStopped(Activity activity) {}
+
+            @Override
+            public void onActivitySaveInstanceState(Activity activity, Bundle outState) {}
+
+            @Override
+            public void onActivityDestroyed(Activity activity) {}
+        };
+        application.registerActivityLifecycleCallbacks(firstLoadStarter);
+    }
+
+    private void startDeferredFirstLoad() {
+        synchronized (commitLock) {
+            firstLoadStarter = null;
+            StateCoreResult currentState = getStateSnapshot();
+            // Already marked, or another version is now pending and this
+            // process is not running it.
+            if (!currentState.firstTime
+                || currentState.currentVersion == null
+                || !currentState.currentVersion.equals(launchVersion)) {
+                return;
+            }
+            SharedPreferences.Editor editor = sp.edit();
+            applyState(editor, runStateCore(
+                STATE_OP_RESOLVE_LAUNCH, currentState, null, false, true));
+            persistEditor(editor, "start deferred first load");
+            ignoreRollback = true;
+        }
+    }
+
     /** Sampled/compared by the native check orchestrator; see resetGeneration. */
     /** Shared by JS and native hosts. Config replacement invalidates old native decisions. */
     private static final java.util.concurrent.atomic.AtomicLong nativeConfigGeneration =
@@ -814,6 +932,13 @@ public class UpdateContext {
 
     static long getNativeConfigGeneration() {
         return nativeConfigGeneration.get();
+    }
+
+    AndroidRound.StartSnapshot snapshotNativeRound() {
+        synchronized (commitLock) {
+            return new AndroidRound.StartSnapshot(resetGeneration.get(), nativeConfigGeneration.get(),
+                sp.getString(NativeCheckOrchestrator.KEY_CONFIG, null));
+        }
     }
 
     void setNativeConfig(String config) {
@@ -861,27 +986,44 @@ public class UpdateContext {
         boolean activate,
         String responseCacheJson
     ) {
+        return commitNativeRoundResult(expectedGeneration, -1, hash, hashInfoJson,
+            activate, responseCacheJson);
+    }
+
+    boolean commitNativeRoundResult(
+        long expectedGeneration,
+        long expectedConfigGeneration,
+        String hash,
+        String hashInfoJson,
+        boolean activate,
+        String responseCacheJson
+    ) {
         boolean switching = activate && hash != null;
         if (!switching) {
             return commitNativeCheckResultState(
-                expectedGeneration, hash, hashInfoJson, false, responseCacheJson);
+                expectedGeneration, expectedConfigGeneration, hash, hashInfoJson, false, responseCacheJson, null);
         }
         synchronized (versionFilesLock) {
-            verifySwitchTarget(hash);
-            return commitNativeCheckResultState(
-                expectedGeneration, hash, hashInfoJson, true, responseCacheJson);
+            try (InstallRecord.Activation snapshot = verifySwitchTarget(hash)) {
+                return commitNativeCheckResultState(
+                    expectedGeneration, expectedConfigGeneration, hash, hashInfoJson, true, responseCacheJson, snapshot);
+            }
         }
     }
 
     private boolean commitNativeCheckResultState(
         long expectedGeneration,
+        long expectedConfigGeneration,
         String hash,
         String hashInfoJson,
         boolean switching,
-        String responseCacheJson
+        String responseCacheJson,
+        InstallRecord.Activation snapshot
     ) {
         synchronized (commitLock) {
-            if (resetGeneration.get() != expectedGeneration) {
+            if (resetGeneration.get() != expectedGeneration
+                || (expectedConfigGeneration >= 0
+                    && nativeConfigGeneration.get() != expectedConfigGeneration)) {
                 return false;
             }
             SharedPreferences.Editor editor = sp.edit();
@@ -894,6 +1036,7 @@ public class UpdateContext {
             if (responseCacheJson != null) {
                 editor.putString(NativeCheckOrchestrator.KEY_RESP_CACHE, responseCacheJson);
             }
+            if (switching) assertSwitchUnchanged(hash, snapshot);
             persistEditorOrThrow(editor, "commit native check result");
             if (switching) {
                 ignoreRollback = false;

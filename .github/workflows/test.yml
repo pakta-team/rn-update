@@ -1,0 +1,325 @@
+# [INPUT]: 依赖独立仓库 SDK 源码、共享核、Android/Harmony/Apple 工具链与候选校验脚本
+# [OUTPUT]: 提供 JS/JVM/JNI/C++/HAR/包消费、Apple 源码与 tvOS 真 RN/OTA/缓存恢复门禁
+# [POS]: 多平台验证编排；验证分支 push 可直接执行，不借用默认分支旧结果
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+name: test
+
+defaults:
+  run:
+    working-directory: .
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+  push:
+    branches:
+      - master
+      - main
+      - 'codex/verify-*'
+
+  workflow_dispatch:
+    inputs:
+      cli_ref:
+        description: Public rn-update-cli branch, tag or commit (repository variable is the fallback)
+        required: false
+        type: string
+
+# Cancel a currently running workflow from the same PR/branch/tag
+# when a new workflow is triggered
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  js-test:
+    name: JS Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run Tests
+        run: bun run test
+
+  android-unit-test:
+    name: Android Gradle JVM and real install JNI tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Test Android binary strings and native library negative controls
+        run: node --test scripts/check-binary-strings.test.js scripts/verify-android-so.test.js
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - name: Install Android SDK and host compiler dependencies
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
+          sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Install e2etest dependencies
+        working-directory: Example/e2etest
+        run: bun install --frozen-lockfile
+      - name: Run Gradle unit tests including testInstallHost
+        working-directory: Example/e2etest/android
+        run: bash gradlew :rn-update:testDebugUnitTest --rerun-tasks --no-daemon --console=plain
+      - name: Upload Gradle test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-unit-test-reports
+          path: |
+            android/build/test-results/testDebugUnitTest/
+            android/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn
+
+  build-release-har:
+    name: Build and test real Release HAR
+    runs-on: ubuntu-latest
+    container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Configure git safe.directory
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git submodule foreach --recursive 'git config --global --add safe.directory "$toplevel/$sm_path"'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+      - name: Build Release HAR from current sources
+        run: npm run build:harmony-har -- --build-mode release
+      - name: Verify real Release HAR and negative controls
+        run: |
+          apt-get update && apt-get install -y python3
+          python3 -B scripts/check-harmony-har.py harmony/pakta.har
+          python3 -B scripts/test-harmony-har.py --har harmony/pakta.har -v
+          python3 -B scripts/test-binary-strings-har.py --har harmony/pakta.har -v
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-har
+          path: harmony/pakta.har
+          if-no-files-found: error
+
+  package-check:
+    name: Package and Version Checks
+    needs: build-release-har
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+      - name: Download current-source Release HAR before package checks
+        uses: actions/download-artifact@v8
+        with:
+          name: release-har
+          path: harmony
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2.11'
+      - name: Check independent tvOS targets and Network specification contracts
+        env:
+          GEM_HOME: ${{ runner.temp }}/podspec-gems
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          gem install cocoapods --version 1.16.2 --no-document
+          ruby scripts/test-tvos-podspec.rb
+      - name: Check release metadata
+        run: |
+          node scripts/release-version.js --check
+          RELEASE_VERSION="$(node -p "require('./package.json').version")" node scripts/check-release-version.js
+      - name: Reject mismatched release candidates and HAR inputs
+        run: |
+          node --test scripts/package-candidate.test.js scripts/package-source-closure.test.js scripts/check-binary-strings.test.js scripts/verify-android-so.test.js
+          python3 -B scripts/check-harmony-har.py harmony/pakta.har
+          python3 -B scripts/test-harmony-har.py --har harmony/pakta.har -v
+          python3 -B scripts/test-binary-strings-har.py --har harmony/pakta.har -v
+      - name: Check package contents
+        run: node scripts/check-packlist.js
+      - name: Check packed declarations in consumer
+        run: bun run test:pack
+
+  cpp-test:
+    name: C++ Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev libbz2-dev
+
+      - name: Build HDiffPatch library
+        working-directory: android/jni/HDiffPatch
+        run: make LZMA=0 DIR_DIFF=0
+
+      - name: Build and run unit_test
+        working-directory: android/jni/HDiffPatch
+        run: |
+          g++ -O2 test/unit_test.cpp libhdiffpatch.a \
+            -D_IS_NEED_ALL_CompressPlugin=0 \
+            -D_IS_NEED_DEFAULT_CompressPlugin=0 \
+            -D_IS_NEED_DIR_DIFF_PATCH=0 \
+            -lpthread \
+            -o unit_test
+          ./unit_test
+
+      - name: Run Pakta patch core and HBC transform tests
+        env:
+          ASAN_OPTIONS: halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: SANITIZE=1 bash scripts/test-patch-core.sh
+
+      # Golden-vector parity between src/updateFlowCore.ts (reference) and
+      # the cpp/update_flow_core port. The vectors themselves are kept in
+      # sync with the TS side by src/__tests__/flowVectors.test.ts (js-test).
+      - name: Replay flow golden vectors against the C++ port
+        run: SANITIZE=1 bash scripts/test-update-flow-core.sh
+
+  apple-source-test:
+    name: Apple source contracts and negative controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Install Objective-C++ syntax compiler
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Run all Apple Python tests
+        run: python3 -B -m unittest discover -s scripts/tests/ios-purge-restore -p 'test_*.py' -v
+      - name: Verify device-driver input and failure-evidence guards
+        run: |
+          python3 -B Example/e2etest/scripts/android-crash-rescue.test.py
+          python3 -B Example/e2etest/scripts/ios-crash-rescue.test.py
+          python3 -B .github/workflows/scripts/test-tvos-runtime.py
+
+  ios-purge-restore-test:
+    name: Native purge-restore ordering
+    runs-on: macos-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Run deterministic native ordering tests and negative controls
+        run: SANITIZE=1 VERIFY_REGRESSIONS=1 bash scripts/test-ios-purge-restore.sh
+
+  tvos-build:
+    name: tvOS Release RN runtime, OTA and cache recovery
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      RCT_NEW_ARCH_ENABLED: '1'
+      RCT_USE_PREBUILT_RNCORE: '0'
+      RCT_USE_RN_DEP: '0'
+      LANG: en_US.UTF-8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.4'
+      - name: Generate an isolated RN-tvos 0.85.3-3 native consumer
+        run: node .github/workflows/scripts/create-tvos-host.js "$RUNNER_TEMP/pakta-tvos-host"
+      - name: Install and verify the tvOS consumer
+        working-directory: ${{ runner.temp }}/pakta-tvos-host
+        run: |
+          bun install
+          node assert-host.js
+      - name: Install the current CLI for real tvOS OTA artifacts
+        uses: ./.github/actions/setup-cli
+        with:
+          ref: ${{ inputs.cli_ref || vars.RNU_CLI_REF || 'main' }}
+      - name: Generate the tvOS application and install CocoaPods
+        working-directory: ${{ runner.temp }}/pakta-tvos-host/ios
+        run: |
+          set -euo pipefail
+          ruby create-project.rb
+          pod install | tee ../pod-install.log
+          grep -F 'rn-update (' Podfile.lock
+          test -f 'build/generated/ios/ReactCodegen/RCTPaktaSpec/RCTPaktaSpec.h'
+      - name: Compile and link the tvOS Release application
+        working-directory: ${{ runner.temp }}/pakta-tvos-host/ios
+        run: |
+          set -euo pipefail
+          xcodebuild -workspace PaktaTVValidation.xcworkspace -scheme PaktaTVValidation \
+            -configuration Release -sdk appletvsimulator \
+            -destination 'generic/platform=tvOS Simulator' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build | tee ../tvos-build.log
+          app=build/Build/Products/Release-appletvsimulator/PaktaTVValidation.app
+          test -f "$app/PaktaTVValidation"
+          plutil -p "$app/Info.plist" | tee ../app-info.log
+          xcodebuild -project PaktaTVValidation.xcodeproj -target PaktaTVValidation \
+            -configuration Release -sdk appletvsimulator -showBuildSettings \
+            | grep -E '^[[:space:]]+(PRODUCT_BUNDLE_IDENTIFIER|EXECUTABLE_NAME|INFOPLIST_FILE|GENERATE_INFOPLIST_FILE|MARKETING_VERSION|CURRENT_PROJECT_VERSION|PLATFORM_NAME) =' \
+            | tee ../app-build-settings.log
+          xcrun nm "$app/PaktaTVValidation" > ../linked-symbols.txt
+          grep -F 'OBJC_CLASS_$_RCTPakta' ../linked-symbols.txt
+          xcrun otool -L "$app/PaktaTVValidation" > ../linked-frameworks.txt
+          grep -F '/Network.framework/' ../linked-frameworks.txt
+      - name: Verify tvOS driver safety boundaries
+        run: python3 .github/workflows/scripts/test-tvos-runtime.py
+      - name: Execute real tvOS RN OTA and purge recovery
+        run: |
+          python3 .github/workflows/scripts/drive-tvos-runtime.py \
+            --host "$RUNNER_TEMP/pakta-tvos-host" \
+            --cli-root "$GITHUB_WORKSPACE/.ci/rn-update-cli" \
+            --output "$RUNNER_TEMP/pakta-tvos-host/runtime-evidence"
+      - name: Preserve tvOS build evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tvos-native-build-evidence
+          path: |
+            ${{ runner.temp }}/pakta-tvos-host/*-*.log
+            ${{ runner.temp }}/pakta-tvos-host/linked-*.txt
+            ${{ runner.temp }}/pakta-tvos-host/ios/Podfile.lock
+            ${{ runner.temp }}/pakta-tvos-host/ios/build/Build/Products/Release-appletvsimulator/PaktaTVValidation.app/Info.plist
+            ${{ runner.temp }}/pakta-tvos-host/bun.lock
+            ${{ runner.temp }}/pakta-tvos-host/runtime-evidence
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,10 +1,11 @@
 /**
- * [INPUT]: 依赖 react-native Platform、i18n，以及宿主提供的 fetch/AbortController/console 基础能力
- * [OUTPUT]: 对外提供统一日志、平台断言、空实现、URL 探测、进度计算、超时与幂等重试 fetch 工具
+ * [INPUT]: 依赖 react-native Platform、i18n、endpoint 的端点对冲竞速，以及宿主提供的 fetch/AbortController/console 基础能力
+ * [OUTPUT]: 对外提供统一日志、平台断言、空实现、按服务端顺序的镜像探测、进度计算、超时与幂等重试 fetch 工具
  * [POS]: src 的横切基础设施工具集，被 core、client 与 Provider 复用；业务策略应留在 updateFlowCore 而非在此生长
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { Platform } from 'react-native';
+import { selectFastestSuccessfulEndpoint } from './endpoint';
 import i18n from './i18n';
 
 // log/info are developer diagnostics (they include full check request bodies
@@ -71,9 +72,9 @@ export const emptyModule = new Proxy(emptyModuleTarget, {
   },
 });
 
-const ping = isWeb
-  ? Promise.resolve
-  : async (url: string) => {
+const ping: (url: string, signal?: AbortSignal) => Promise<string> = isWeb
+  ? async () => ''
+  : async (url: string, signal?: AbortSignal) => {
       try {
         const {
           status,
@@ -84,7 +85,8 @@ const ping = isWeb
           {
             method: 'HEAD',
           },
-          DEFAULT_FETCH_TIMEOUT_MS
+          DEFAULT_FETCH_TIMEOUT_MS,
+          signal
         );
         if (status === 200) {
           if (isProtocolDowngrade(url, finalUrl)) {
@@ -99,25 +101,44 @@ const ping = isWeb
         log('ping failed', url, status, statusText);
         throw Error(i18n.t('error_ping_failed'));
       } catch (e) {
-        log('ping error', url, e);
+        if (!signal?.aborted) {
+          log('ping error', url, e);
+        }
         throw e;
       }
     };
 
 export { joinUrls } from './updateFlowCore';
 
-export const testUrls = async (urls?: string[]): Promise<string | null> => {
+// Longer than a first HTTPS request on a mobile network (TCP, TLS and HEAD are
+// about three round trips), or the next mirror would start on nearly every
+// download and the server's order would mean nothing. A second of probing is
+// small next to the download it picks a mirror for.
+export const DOWNLOAD_HEDGE_DELAY_MS = 1000;
+
+/**
+ * Picks the mirror to download from, preferring the server's order: the next
+ * mirror is only probed after a delay without an answer, or at once when the
+ * previous one failed. A healthy first mirror costs a single HEAD.
+ */
+export const testUrls = async (
+  urls?: string[],
+  hedgeDelayMs: number = DOWNLOAD_HEDGE_DELAY_MS
+): Promise<string | null> => {
   if (!urls?.length) {
     return null;
   }
 
-  try {
-    const ret = await promiseAny(urls.map(ping));
-    if (ret) {
-      log('ping success, use url:', ret);
-      return ret as string;
-    }
-  } catch {}
+  const { success } = await selectFastestSuccessfulEndpoint(
+    urls,
+    ping,
+    Date.now,
+    hedgeDelayMs
+  );
+  if (success?.value) {
+    log('ping success, use url:', success.value);
+    return success.value;
+  }
   log('all ping failed, use first url:', urls[0]);
   return urls[0];
 };

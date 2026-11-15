@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 react-native TurboModule 类型与 TurboModuleRegistry，并与 Android/iOS/Harmony 的版本绑定成功确认签名保持同构
  * [OUTPUT]: 对外提供包含 markSuccess(expectedHash) 的 Codegen Spec 接口及可空的 Pakta TurboModule 实例
- * [POS]: src 的新架构桥契约，由 core 按运行时架构装载；只描述边界，不承载更新业务规则
+ * [POS]: src 的本地桥方法事实入口，由 core 按架构装载；T09 据此派生旧架构 Java Spec 与 Harmony 方法表并校验四端签名，不承载业务规则或 T08 常量
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { type TurboModule, TurboModuleRegistry } from 'react-native';

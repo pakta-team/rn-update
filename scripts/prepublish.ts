@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * [INPUT]: 依赖 Bun/node fs、git 标签与 RELEASE_VERSION/GITHUB_REF 环境，调用 build:harmony-har、build:so 和 verify-android-so.js
- * [OUTPUT]: 在 CI 中校验并同步 SDK/CLI/Harmony 版本，在本地/发布流程中构建原生产物并以进程状态报告发布闸门结果
+ * [OUTPUT]: 在 CI 中校验并同步本仓库 SDK/Harmony 版本，在本地/发布流程中构建原生产物并以进程状态报告发布闸门结果
  * [POS]: scripts 的 npm prepublish 总编排入口，串联版本、原生构建和 ABI 完整性检查，不定义产品更新策略
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -114,7 +114,7 @@ async function modifyPackageJson({
 }
 
 function syncReleaseMetadata(version: string): void {
-  console.log('Synchronizing SDK, CLI and Harmony release metadata...');
+  console.log('Synchronizing SDK and Harmony release metadata...');
   const result = Bun.spawnSync(
     ['node', path.join(__dirname, 'release-version.js'), version],
     {

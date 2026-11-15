@@ -1,0 +1,46 @@
+# [INPUT]: 依赖 SDK 依赖锁、TypeScript/Biome 与共享桥接契约检查
+# [OUTPUT]: 提供 SDK 静态检查结果
+# [POS]: 本地源码的 CI 质量入口，主分支及隔离验证分支运行同一命令
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+name: lint
+
+defaults:
+  run:
+    working-directory: .
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+  push:
+    branches:
+      - master
+      - main
+      - 'codex/verify-*'
+
+  workflow_dispatch:
+
+# Cancel a currently running workflow from the same PR/branch/tag
+# when a new workflow is triggered
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install Dependency
+        run: bun install --frozen-lockfile
+
+      - name: Run lint
+        run: bun lint

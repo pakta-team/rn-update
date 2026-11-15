@@ -1,0 +1,283 @@
+# [INPUT]: 依赖独立 SDK 与单独检出的公开 CLI 源码、原生依赖及本地内容缓存 action
+# [OUTPUT]: 提供 iOS core/native Release 链路及 native leg 的真实坏 JS/Hermes 救援检查
+# [POS]: Apple 宿主集成门禁；内容缓存不作为已编译 app 或当前源码有效性的证明
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+name: e2e-ios
+
+defaults:
+  run:
+    working-directory: .
+
+on:
+  pull_request:
+    branches:
+      - '**'
+    paths:
+      - '.github/workflows/e2e_ios.yml'
+      - '.github/actions/setup-cli/**'
+      - '.github/actions/e2e-cache/**'
+      - '.gitmodules'
+      - 'package.json'
+      - 'bun.lock'
+      - 'rn-update.podspec'
+      - 'react-native.config.js'
+      - 'expo-module.config.json'
+      - 'src/**'
+      - 'scripts/**'
+      - 'ios/**'
+      - 'cpp/**'
+      - 'android/jni/**'
+      - 'Example/e2etest/**'
+  push:
+    branches:
+      - master
+      - main
+      - 'codex/verify-*'
+    paths:
+      - '.github/workflows/e2e_ios.yml'
+      - '.github/actions/setup-cli/**'
+      - '.github/actions/e2e-cache/**'
+      - '.gitmodules'
+      - 'package.json'
+      - 'bun.lock'
+      - 'rn-update.podspec'
+      - 'react-native.config.js'
+      - 'expo-module.config.json'
+      - 'src/**'
+      - 'scripts/**'
+      - 'ios/**'
+      - 'cpp/**'
+      - 'android/jni/**'
+      - 'Example/e2etest/**'
+
+  workflow_dispatch:
+    inputs:
+      cli_ref:
+        description: Public rn-update-cli branch, tag or commit (repository variable is the fallback)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-ios:
+    # 不带 matrix 值全量拼名,否则 check 叫 "e2e-ios (native, --config e2e/…)"
+    name: e2e-ios (${{ matrix.suite }})
+    runs-on: macos-26
+    # 绿色基线 ~16 分钟。60 分钟覆盖最坏情况:一个用例等满 300s testTimeout,
+    # 再叠一次 --retries 1 全量重试。40 分钟不够——实测重试跑到一半被腰斩,
+    # 把"慢但能恢复"的运行变成 cancelled,等于白开了 retries。
+    timeout-minutes: 60
+    strategy:
+      # 两条 leg 各自独立成败:一条超时不该掩盖另一条的结论
+      fail-fast: false
+      matrix:
+        include:
+          # 既有 suite(local-merge / bundle-hash),沿用默认 runner 配置
+          - suite: core
+            jest-config: ''
+          # 原生冷启动检测:每条断言都要真实重启 app,单独跑才不会把 core
+          # 顶过 40 分钟(拆分前实测 core 已占 36 分)
+          - suite: native
+            jest-config: '--config e2e/native/jest.config.js'
+    steps:
+      - name: Checkout rn-update
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v5.0.4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-e2e-${{ hashFiles('Example/e2etest/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-e2e-
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.4'
+
+      - name: Boot iOS simulator in background
+        # 模拟器冷启动要 2-5 分钟,提前异步 boot,让它和依赖安装/xcodebuild
+        # 并行。型号必须用与 .detoxrc.ts 完全同一份探测代码——此前 shell 里
+        # 另写一份选中了 detox 不用的设备,预热全部白费。
+        # 失败无害:detox 测试阶段会自己 boot。
+        run: |
+          udid=$(node Example/e2etest/scripts/detect-ios-simulator-type.js --udid)
+          if [ -n "$udid" ]; then
+            echo "pre-booting $(node Example/e2etest/scripts/detect-ios-simulator-type.js) ($udid)"
+            xcrun simctl boot "$udid" || true
+          else
+            echo "no matching simulator found, skipping pre-boot"
+          fi
+
+      - name: Cache Homebrew downloads
+        # 内容寻址仍由 Homebrew 校验；仅受信主分支的 core 保存每日快照。
+        uses: ./.github/actions/e2e-cache
+        with:
+          path: ~/Library/Caches/Homebrew
+          scope: brew-xcode-26.4
+          write: ${{ matrix.suite == 'core' }}
+
+      - name: Install applesimutils and ccache
+        run: brew trust wix/brew && HOMEBREW_NO_AUTO_UPDATE=1 brew install wix/brew/applesimutils ccache
+
+      - name: Cache ccache
+        # ccache 自行验证内容；PR 和 native leg 仅恢复，不按提交重复保存。
+        uses: ./.github/actions/e2e-cache
+        with:
+          path: ~/Library/Caches/ccache
+          scope: ccache-xcode-26.4
+          write: ${{ matrix.suite == 'core' }}
+
+      - name: Install e2etest dependencies
+        run: cd Example/e2etest && bun install --frozen-lockfile
+
+      - name: Verify core and Harmony runner discovery stay isolated
+        run: cd Example/e2etest && bun run test:runner-boundaries
+
+      - name: Link local rn-update
+        run: |
+          set -euo pipefail
+          export LOCAL_RNU_VERSION="$(node -p "require('./Example/e2etest/node_modules/rn-update/package.json').version")"
+          LOCAL_RNU_DIR="$PWD/Example/e2etest/.e2e-artifacts/local-rn-update"
+          rm -rf "$LOCAL_RNU_DIR" Example/e2etest/node_modules/rn-update
+          mkdir -p "$LOCAL_RNU_DIR"
+          cp package.json rn-update.podspec react-native.config.js expo-module.config.json "$LOCAL_RNU_DIR"/
+          rsync -a --exclude='.git' src ios android cpp scripts "$LOCAL_RNU_DIR"/
+          node -e "const fs = require('fs'); const file = 'Example/e2etest/.e2e-artifacts/local-rn-update/package.json'; const pkg = JSON.parse(fs.readFileSync(file, 'utf8')); pkg.version = process.env.LOCAL_RNU_VERSION; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');"
+          ln -s ../.e2e-artifacts/local-rn-update Example/e2etest/node_modules/rn-update
+
+      - name: Install the independently checked-out public CLI
+        uses: ./.github/actions/setup-cli
+        with:
+          ref: ${{ inputs.cli_ref || vars.RNU_CLI_REF || 'main' }}
+
+      - name: Cache Metro transform cache
+        # Metro 自行验证 transform key；该目录不保存已编译 app。
+        uses: ./.github/actions/e2e-cache
+        with:
+          path: Example/e2etest/.metro-cache
+          scope: metro-xcode-26.4
+          write: ${{ matrix.suite == 'core' }}
+
+      - name: Prepare local update artifacts
+        env:
+          E2E_PLATFORM: ios
+          RNU_CLI_ROOT: ${{ github.workspace }}/.ci/rn-update-cli
+        run: cd Example/e2etest && bun run prepare:e2e
+
+      - name: Cache CocoaPods downloads
+        uses: actions/cache@v5.0.4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: ${{ runner.os }}-cocoapods-e2e-${{ hashFiles('Example/e2etest/ios/Podfile.lock', 'Example/e2etest/ios/Podfile', 'Example/e2etest/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cocoapods-e2e-
+
+      - name: Cache built e2e app (keyed on native inputs)
+        # 命中 = native 输入(两个 ios 工程、cpp/jni、podspec、依赖锁、codegen 输入)
+        # 一字未改,跳过 pod install + xcodebuild,只重新注入 JS bundle(见下)。
+        # codegen 输入必须参与 key:TurboModule 胶水在 pod install 时由根
+        # package.json 的 codegenConfig + src/Native*.ts spec 生成,漏了它们
+        # 会在改 spec 后把新 JS 注入到旧胶水的二进制上。
+        # 故意不设 restore-keys:部分命中就是错的二进制,宁可全量重建。
+        id: cache-ios-app
+        uses: actions/cache@v5.0.4
+        with:
+          path: |
+            Example/e2etest/ios/build/Build/Products/Release-iphonesimulator/AwesomeProject.app
+            Example/e2etest/ios/build/hermesc
+          key: ${{ runner.os }}-e2e-app-xcode-26.4-${{ hashFiles('Example/e2etest/ios/**', 'Example/e2etest/package.json', 'Example/e2etest/bun.lock', 'rn-update.podspec', 'react-native.config.js', 'expo-module.config.json', 'ios/**', 'cpp/**', 'android/jni/**', 'src/Native*.ts', 'package.json') }}
+
+      - name: Install CocoaPods dependencies
+        if: steps.cache-ios-app.outputs.cache-hit != 'true'
+        # USE_CCACHE=1 让 react_native_post_install 给所有 pod target 接上
+        # RN 自带的 ccache 编译器包装脚本
+        run: cd Example/e2etest/ios && USE_CCACHE=1 pod install
+
+      - name: Cache Detox iOS framework
+        id: cache-detox-ios-framework
+        uses: actions/cache@v5.0.4
+        with:
+          path: ~/Library/Detox
+          key: ${{ runner.os }}-detox-ios-framework-xcode-26.4-${{ hashFiles('Example/e2etest/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-detox-ios-framework-xcode-26.4-
+
+      - name: Build Detox iOS framework cache
+        if: steps.cache-detox-ios-framework.outputs.cache-hit != 'true'
+        run: cd Example/e2etest && bunx detox build-framework-cache
+
+      - name: Detox build (ios.sim.release)
+        if: steps.cache-ios-app.outputs.cache-hit != 'true'
+        env:
+          RNU_CLI_ROOT: ${{ github.workspace }}/.ci/rn-update-cli
+        run: |
+          cd Example/e2etest && E2E_PLATFORM=ios bunx detox build --configuration ios.sim.release
+          # hermesc 进缓存区:命中 run 没有 Pods,注入脚本需要它编 HBC
+          cp ios/Pods/hermes-engine/destroot/bin/hermesc ios/build/hermesc
+
+      - name: Refresh JS bundle in cached app
+        if: steps.cache-ios-app.outputs.cache-hit == 'true'
+        run: cd Example/e2etest && bash scripts/refresh-ios-app-bundle.sh
+
+      - name: Detox test (ios.sim.release)
+        env:
+          RNU_CLI_ROOT: ${{ github.workspace }}/.ci/rn-update-cli
+          RNU_E2E_SKIP_PREPARE: 'true'
+        # Detox 的 CI 默认参数会覆盖 Jest 单 worker 配置；显式串行启动设备，避免两套件争用 runner 预算。
+        run: cd Example/e2etest && E2E_PLATFORM=ios bunx detox test --configuration ios.sim.release --retries 1 --maxWorkers 1 ${{ matrix.jest-config }}
+
+      - name: Upload Detox artifacts
+        # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-ios-detox-artifacts-${{ matrix.suite }}
+          path: Example/e2etest/artifacts
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Prove real bad-JS crash rescue without forceBoot
+        if: matrix.suite == 'native'
+        working-directory: Example/e2etest
+        run: |
+          set -euo pipefail
+          python3 scripts/ios-crash-rescue.test.py
+          if lsof -nP -iTCP:31337 -sTCP:LISTEN; then
+            echo 'Detox server did not release the rescue port' >&2
+            exit 1
+          fi
+          python3 scripts/drive-ios-crash-rescue.py \
+            --app ios/build/Build/Products/Release-iphonesimulator/AwesomeProject.app \
+            --udid "$(node scripts/detect-ios-simulator-type.js --udid)" \
+            --cli-root "$GITHUB_WORKSPACE/.ci/rn-update-cli" \
+            --output ".e2e-artifacts/ios-crash-rescue-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Preserve iOS crash-rescue evidence
+        if: always() && matrix.suite == 'native'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-crash-rescue-evidence
+          path: Example/e2etest/.e2e-artifacts/ios-crash-rescue-*
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,0 +1,560 @@
+# [INPUT]: 依赖当前 SDK/CLI、固定 NDK 与 React Native 消费端工程
+# [OUTPUT]: 提供同轮四 ABI 库及 Release/Debug/旧架构设备验证，两个 Release leg 追加真实坏 JS 救援
+# [POS]: Android 宿主矩阵；校验同轮原生库，action 内设备命令显式定位 workspace 中的宿主
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+name: e2e-android
+
+defaults:
+  run:
+    working-directory: .
+
+on:
+  pull_request:
+    branches:
+      - '**'
+    paths:
+      - '.github/workflows/e2e_android.yml'
+      - '.github/actions/setup-cli/**'
+      - '.gitmodules'
+      - 'package.json'
+      - 'bun.lock'
+      - 'rn-update.podspec'
+      - 'react-native.config.js'
+      - 'expo-module.config.json'
+      - 'src/**'
+      - 'scripts/**'
+      - 'android/**'
+      - 'cpp/**'
+      - 'Example/e2etest/**'
+  push:
+    branches:
+      - master
+      - main
+      - 'codex/verify-*'
+    paths:
+      - '.github/workflows/e2e_android.yml'
+      - '.github/actions/setup-cli/**'
+      - '.gitmodules'
+      - 'package.json'
+      - 'bun.lock'
+      - 'rn-update.podspec'
+      - 'react-native.config.js'
+      - 'expo-module.config.json'
+      - 'src/**'
+      - 'scripts/**'
+      - 'android/**'
+      - 'cpp/**'
+      - 'Example/e2etest/**'
+
+  workflow_dispatch:
+    inputs:
+      cli_ref:
+        description: Public rn-update-cli branch, tag or commit (repository variable is the fallback)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-android-so:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NDK_VERSION: 28.2.13676358
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install pinned NDK
+        run: echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION"
+      - name: Rebuild and verify Android native libraries
+        run: |
+          rm -rf android/lib android/obj
+          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION" bash scripts/build-android-so.sh
+          cd android/lib
+          sha256sum */librnupdate.so > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: e2e-android-so
+          path: android/lib/
+          if-no-files-found: error
+
+  e2e-android:
+    needs: build-android-so
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout rn-update
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-e2e-${{ hashFiles('Example/e2etest/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-e2e-
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            Example/e2etest/bun.lock
+            Example/e2etest/android/*.gradle
+            Example/e2etest/android/**/*.gradle
+            Example/e2etest/android/gradle/wrapper/gradle-wrapper.properties
+            android/**
+            cpp/**
+            scripts/build-android-so.sh
+            scripts/verify-android-so.js
+            .github/workflows/e2e_android.yml
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install e2etest dependencies
+        run: cd Example/e2etest && bun install --frozen-lockfile
+
+      - name: Verify core and Harmony runner discovery stay isolated
+        run: cd Example/e2etest && bun run test:runner-boundaries
+
+      - name: Remove committed Android native libraries
+        run: rm -rf android/lib
+      - name: Use CI-built Android native libraries
+        uses: actions/download-artifact@v8
+        with:
+          name: e2e-android-so
+          path: android/lib
+      - name: Verify CI-built Android native libraries
+        run: |
+          node scripts/verify-android-so.js
+          cd android/lib
+          sha256sum --check SHA256SUMS
+
+      - name: Link local rn-update
+        run: |
+          set -euo pipefail
+          export LOCAL_RNU_VERSION="$(node -p "require('./Example/e2etest/node_modules/rn-update/package.json').version")"
+          LOCAL_RNU_DIR="$PWD/Example/e2etest/.e2e-artifacts/local-rn-update"
+          rm -rf "$LOCAL_RNU_DIR" Example/e2etest/node_modules/rn-update
+          mkdir -p "$LOCAL_RNU_DIR"
+          cp package.json rn-update.podspec react-native.config.js expo-module.config.json "$LOCAL_RNU_DIR"/
+          rsync -a --exclude='.git' src ios android cpp scripts "$LOCAL_RNU_DIR"/
+          node -e "const fs = require('fs'); const file = 'Example/e2etest/.e2e-artifacts/local-rn-update/package.json'; const pkg = JSON.parse(fs.readFileSync(file, 'utf8')); pkg.version = process.env.LOCAL_RNU_VERSION; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');"
+          ln -s ../.e2e-artifacts/local-rn-update Example/e2etest/node_modules/rn-update
+
+      - name: Install the independently checked-out public CLI
+        uses: ./.github/actions/setup-cli
+        with:
+          ref: ${{ inputs.cli_ref || vars.RNU_CLI_REF || 'main' }}
+
+      - name: Detox build (android.emu.release)
+        env:
+          DETOX_ANDROID_ARCHS: x86_64
+          DETOX_AVD_NAME: api34
+        run: cd Example/e2etest && E2E_PLATFORM=android bunx detox build --configuration android.emu.release
+
+      - name: Prepare local update artifacts
+        env:
+          E2E_PLATFORM: android
+          RNU_CLI_ROOT: ${{ github.workspace }}/.ci/rn-update-cli
+        run: cd Example/e2etest && bun run prepare:e2e
+
+      - name: Detox test (android.emu.release)
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          DETOX_ANDROID_ARCHS: x86_64
+          RNU_CLI_ROOT: ${{ github.workspace }}/.ci/rn-update-cli
+          RNU_E2E_SKIP_PREPARE: 'true'
+          DETOX_AVD_NAME: api34
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          avd-name: api34
+          # Pinned while stabilizing e2e. The 2026-07-30 breakage was NOT the
+          # emulator version (red herring): bundle-hash.test.ts landed 07-29 as
+          # a second suite, and .detoxrc.js forces maxWorkers 2 on CI — the
+          # second Detox worker tries to boot the same AVD twice, which Android
+          # cannot do, and retries until the job times out (fixed with
+          # --maxWorkers 1 below). Unpin once a run proves 37.x stable.
+          emulator-build: 15507667
+          emulator-boot-timeout: 900
+          # 每条命令自带 cd:android-emulator-runner 逐行起独立 shell,
+          # 单独一行的 cd 不会保持到下一条(实测 detox 会在仓库根找不到 jest)
+          script: |
+            cd "$GITHUB_WORKSPACE/Example/e2etest" && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
+            # 原生冷启动检测有自己的 runner 配置(见 e2e/native/jest.config.js);
+            # Android 这个 job 有预算,不必像 iOS 那样拆成独立 job
+            cd "$GITHUB_WORKSPACE/Example/e2etest" && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1 --config e2e/native/jest.config.js
+            node "$GITHUB_WORKSPACE/Example/e2etest/scripts/run-android-crash-rescue.js" --project "$GITHUB_WORKSPACE/Example/e2etest" --cli "$GITHUB_WORKSPACE/.ci/rn-update-cli" --apk "$GITHUB_WORKSPACE/Example/e2etest/android/app/build/outputs/apk/release/app-release.apk" --serial "$(adb get-serialno)" --package com.awesomeproject --output "$GITHUB_WORKSPACE/Example/e2etest/.e2e-artifacts/android-crash-rescue-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Preserve real bad-JS crash-rescue evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-crash-rescue-rn085
+          path: Example/e2etest/.e2e-artifacts/android-crash-rescue-*
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Detox artifacts
+        # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-android-detox-artifacts
+          path: Example/e2etest/artifacts
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Debug 构建启动冒烟:codegen 生成的 Java spec 把常量校验等检查包在
+  # ReactBuildConfig.DEBUG 内,上面的 release e2e 物理上跑不到这些代码路径
+  # (v10.48.2 的 "doesn't declare constants" 启动崩溃就是这样漏掉的)。
+  # 只验证 debug 包能启动进首屏,不跑更新流,所以不需要更新 server 和产物。
+  e2e-android-debug-smoke:
+    needs: build-android-so
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout rn-update
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-e2e-${{ hashFiles('Example/e2etest/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-e2e-
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            Example/e2etest/bun.lock
+            Example/e2etest/android/*.gradle
+            Example/e2etest/android/**/*.gradle
+            Example/e2etest/android/gradle/wrapper/gradle-wrapper.properties
+            android/**
+            cpp/**
+            scripts/build-android-so.sh
+            scripts/verify-android-so.js
+            .github/workflows/e2e_android.yml
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install e2etest dependencies
+        run: cd Example/e2etest && bun install --frozen-lockfile
+
+      - name: Remove committed Android native libraries
+        run: rm -rf android/lib
+      - name: Use CI-built Android native libraries
+        uses: actions/download-artifact@v8
+        with:
+          name: e2e-android-so
+          path: android/lib
+      - name: Verify CI-built Android native libraries
+        run: |
+          node scripts/verify-android-so.js
+          cd android/lib
+          sha256sum --check SHA256SUMS
+
+      - name: Link local rn-update
+        run: |
+          set -euo pipefail
+          export LOCAL_RNU_VERSION="$(node -p "require('./Example/e2etest/node_modules/rn-update/package.json').version")"
+          LOCAL_RNU_DIR="$PWD/Example/e2etest/.e2e-artifacts/local-rn-update"
+          rm -rf "$LOCAL_RNU_DIR" Example/e2etest/node_modules/rn-update
+          mkdir -p "$LOCAL_RNU_DIR"
+          cp package.json rn-update.podspec react-native.config.js expo-module.config.json "$LOCAL_RNU_DIR"/
+          rsync -a --exclude='.git' src ios android cpp scripts "$LOCAL_RNU_DIR"/
+          node -e "const fs = require('fs'); const file = 'Example/e2etest/.e2e-artifacts/local-rn-update/package.json'; const pkg = JSON.parse(fs.readFileSync(file, 'utf8')); pkg.version = process.env.LOCAL_RNU_VERSION; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');"
+          ln -s ../.e2e-artifacts/local-rn-update Example/e2etest/node_modules/rn-update
+
+      - name: Detox build (android.emu.debug)
+        env:
+          DETOX_ANDROID_ARCHS: x86_64
+          DETOX_AVD_NAME: api34
+        run: cd Example/e2etest && bunx detox build --configuration android.emu.debug
+
+      - name: Start Metro in background
+        run: |
+          cd Example/e2etest
+          mkdir -p .e2e-artifacts
+          nohup bun start > .e2e-artifacts/metro.log 2>&1 &
+          # 预热 dev bundle:趁模拟器启动的窗口把首个 bundle 编出来,
+          # 避免 app 首次加载时现编,把冒烟等待时间全吃掉
+          nohup bash -c 'for i in $(seq 1 90); do curl -sf http://localhost:8081/status >/dev/null && break; sleep 2; done; curl -sf --max-time 420 -o /dev/null "http://localhost:8081/index.bundle?platform=android&dev=true&minify=false"' > .e2e-artifacts/metro-prewarm.log 2>&1 &
+
+      - name: Detox test (android.emu.debug boot smoke)
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          DETOX_ANDROID_ARCHS: x86_64
+          DETOX_AVD_NAME: api34
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          avd-name: api34
+          # Pinned while stabilizing e2e. The 2026-07-30 breakage was NOT the
+          # emulator version (red herring): bundle-hash.test.ts landed 07-29 as
+          # a second suite, and .detoxrc.js forces maxWorkers 2 on CI — the
+          # second Detox worker tries to boot the same AVD twice, which Android
+          # cannot do, and retries until the job times out (fixed with
+          # --maxWorkers 1 below). Unpin once a run proves 37.x stable.
+          emulator-build: 15507667
+          emulator-boot-timeout: 900
+          # 注意:emulator-runner 把 script 的每一行单独用 sh -c 执行,
+          # cd 不会跨行生效,所以每行必须自包含。
+          script: |
+            for i in $(seq 1 90); do curl -sf http://localhost:8081/status >/dev/null && break; sleep 2; done
+            curl -sf --max-time 420 -o /dev/null "http://localhost:8081/index.bundle?platform=android&dev=true&minify=false" || { echo '::error::Metro dev bundle failed to build'; tail -n 100 "$GITHUB_WORKSPACE/Example/e2etest/.e2e-artifacts/metro.log"; exit 1; }
+            cd "$GITHUB_WORKSPACE/Example/e2etest" && bunx detox test --configuration android.emu.debug --config e2e/smoke/jest.config.js --no-start --headless --record-logs all --retries 1
+
+      - name: Upload Detox artifacts
+        # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-android-debug-smoke-detox-artifacts
+          path: |
+            Example/e2etest/artifacts
+            Example/e2etest/.e2e-artifacts/metro.log
+            Example/e2etest/.e2e-artifacts/metro-prewarm.log
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-android-rn077-oldarch:
+    needs: build-android-so
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout rn-update
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-e2e-rn077-oldarch-${{ hashFiles('Example/e2etest/bun.lock', 'Example/e2etest/scripts/create-rn077-oldarch-project.js') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-e2e-rn077-oldarch-
+            ${{ runner.os }}-bun-e2e-
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            Example/e2etest/bun.lock
+            Example/e2etest/scripts/create-rn077-oldarch-project.js
+            Example/e2etest/android/**
+            android/**
+            cpp/**
+            scripts/build-android-so.sh
+            scripts/verify-android-so.js
+            .github/workflows/e2e_android.yml
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Remove committed Android native libraries
+        run: rm -rf android/lib
+      - name: Use CI-built Android native libraries
+        uses: actions/download-artifact@v8
+        with:
+          name: e2e-android-so
+          path: android/lib
+      - name: Verify CI-built Android native libraries
+        run: |
+          node scripts/verify-android-so.js
+          cd android/lib
+          sha256sum --check SHA256SUMS
+
+      - name: Install SDK declaration build dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install the shared rescue artifact verifier dependencies
+        run: cd Example/e2etest && bun install --frozen-lockfile
+
+      - name: Verify copied RN077 and shared runner boundaries
+        run: |
+          node --test Example/e2etest/scripts/rn077-oldarch.test.js
+          cd Example/e2etest && bun run test:runner-boundaries
+
+      - name: Create the Android SDK candidate from this run's native libraries
+        # RN077 必须安装候选本身，后续不能用 checkout 链接替换并绕过候选守卫。
+        # 该包仅供 Android 消费构建，不宣称包含 Release HAR 或获得发布准入。
+        run: |
+          set -euo pipefail
+          bun run build:types
+          candidate_dir="$RUNNER_TEMP/rn077-android-candidate"
+          mkdir -p "$candidate_dir"
+          npm pack --ignore-scripts --pack-destination "$candidate_dir" --json > "$candidate_dir/pack.json"
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { readCandidate } = require('./scripts/package-candidate');
+          const dir = path.join(process.env.RUNNER_TEMP, 'rn077-android-candidate');
+          const packed = JSON.parse(fs.readFileSync(path.join(dir, 'pack.json'), 'utf8'));
+          assert.equal(packed.length, 1);
+          const candidate = readCandidate(path.join(dir, packed[0].filename));
+          for (const abi of ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']) {
+            const file = `android/lib/${abi}/librnupdate.so`;
+            assert.deepEqual(candidate.readFile(file), fs.readFileSync(file), `${abi} must use this run's library`);
+          }
+          fs.writeFileSync(path.join(dir, 'candidate.json'), JSON.stringify({tarball: candidate.tarball, sha256: candidate.sha256, version: candidate.metadata.version}, null, 2) + '\n');
+          fs.appendFileSync(process.env.GITHUB_ENV, `RNU_SDK_TARBALL=${candidate.tarball}\nRNU_SDK_SHA256=${candidate.sha256}\n`);
+          NODE
+
+      - name: Create RN 0.77.3 old architecture e2e project
+        run: node Example/e2etest/scripts/create-rn077-oldarch-project.js
+
+      - name: Install and verify the RN 0.77.3 candidate consumer
+        run: |
+          cd .e2e-rn077-oldarch/AwesomeProject
+          bun install
+          node scripts/assert-rn077-oldarch.js
+
+      - name: Install the independently checked-out public CLI
+        uses: ./.github/actions/setup-cli
+        with:
+          ref: ${{ inputs.cli_ref || vars.RNU_CLI_REF || 'main' }}
+
+      - name: Detox build (RN 0.77.3 old arch android.emu.release)
+        env:
+          DETOX_ANDROID_ARCHS: x86_64
+          DETOX_AVD_NAME: api34
+        run: cd .e2e-rn077-oldarch/AwesomeProject && E2E_PLATFORM=android bunx detox build --configuration android.emu.release
+
+      - name: Verify both host and SDK Release architecture
+        run: cd .e2e-rn077-oldarch/AwesomeProject && node scripts/assert-rn077-oldarch.js --release
+
+      - name: Prepare local update artifacts
+        env:
+          E2E_PLATFORM: android
+          RNU_CLI_ROOT: ${{ github.workspace }}/.ci/rn-update-cli
+        run: cd .e2e-rn077-oldarch/AwesomeProject && bun run prepare:e2e
+
+      - name: Detox test (RN 0.77.3 old arch android.emu.release)
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          DETOX_ANDROID_ARCHS: x86_64
+          RNU_CLI_ROOT: ${{ github.workspace }}/.ci/rn-update-cli
+          RNU_E2E_SKIP_PREPARE: 'true'
+          DETOX_AVD_NAME: api34
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          avd-name: api34
+          # Pinned while stabilizing e2e. The 2026-07-30 breakage was NOT the
+          # emulator version (red herring): bundle-hash.test.ts landed 07-29 as
+          # a second suite, and .detoxrc.js forces maxWorkers 2 on CI — the
+          # second Detox worker tries to boot the same AVD twice, which Android
+          # cannot do, and retries until the job times out (fixed with
+          # --maxWorkers 1 below). Unpin once a run proves 37.x stable.
+          emulator-build: 15507667
+          emulator-boot-timeout: 900
+          # 每条命令自带 cd,理由同上
+          script: |
+            cd "$GITHUB_WORKSPACE/.e2e-rn077-oldarch/AwesomeProject" && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
+            cd "$GITHUB_WORKSPACE/.e2e-rn077-oldarch/AwesomeProject" && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1 --config e2e/native/jest.config.js
+            node "$GITHUB_WORKSPACE/Example/e2etest/scripts/run-android-crash-rescue.js" --project "$GITHUB_WORKSPACE/.e2e-rn077-oldarch/AwesomeProject" --cli "$GITHUB_WORKSPACE/.ci/rn-update-cli" --apk "$GITHUB_WORKSPACE/.e2e-rn077-oldarch/AwesomeProject/android/app/build/outputs/apk/release/app-release.apk" --serial "$(adb get-serialno)" --package com.awesomeproject --output "$GITHUB_WORKSPACE/.e2e-rn077-oldarch/AwesomeProject/.e2e-artifacts/android-crash-rescue-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Preserve real old-architecture crash-rescue evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-crash-rescue-rn077
+          path: .e2e-rn077-oldarch/AwesomeProject/.e2e-artifacts/android-crash-rescue-*
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Detox artifacts
+        # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-android-rn077-oldarch-detox-artifacts
+          path: .e2e-rn077-oldarch/AwesomeProject/artifacts
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Preserve the RN077 candidate identity
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rn077-android-candidate
+          path: ${{ runner.temp }}/rn077-android-candidate/
+          if-no-files-found: ignore
+          retention-days: 7

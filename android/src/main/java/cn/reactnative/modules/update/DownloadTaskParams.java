@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 File、UpdateContext.DownloadFileListener 与调用方给出的任务身份/截止时间
+ * [INPUT]: 依赖 File、UpdateContext.DownloadFileListener 与调用方给出的任务身份/截止时间；任务编号由 scripts/contract.json 的 taskTypes 派生
  * [OUTPUT]: 对内提供清理、全量、APK 差分、PPK 差分、普通下载五类任务命令对象
  * [POS]: UpdateContext 与 DownloadTask 之间的参数信封，集中表达文件目标和回调而不执行副作用
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -12,12 +12,12 @@ import java.io.File;
  * Created by tdzl2003 on 3/31/16.
  */
 class DownloadTaskParams {
-    static final int TASK_TYPE_CLEANUP          = 0; //Keep hash & originHash
+    static final int TASK_TYPE_CLEANUP = 0; //Keep hash & originHash
 
-    static final int TASK_TYPE_PATCH_FULL       = 1;
-    static final int TASK_TYPE_PATCH_FROM_APK   = 2;
-    static final int TASK_TYPE_PATCH_FROM_PPK   = 3;
-    static final int TASK_TYPE_PLAIN_DOWNLOAD   = 4;
+    static final int TASK_TYPE_PATCH_FULL = 1;
+    static final int TASK_TYPE_PATCH_FROM_APK = 2;
+    static final int TASK_TYPE_PATCH_FROM_PPK = 3;
+    static final int TASK_TYPE_PLAIN_DOWNLOAD = 4;
 
 
     int         type;

@@ -1,0 +1,276 @@
+# [INPUT]: 依赖 Expo57 样例锁、本轮 SDK 原生源码、插件及平台工具链
+# [OUTPUT]: 提供 Android/iOS Expo Release 编译及独立 Expo57 x86_64 真坏 JS 救援设备门禁
+# [POS]: Expo Modules 消费端；编译宿主保持原样，设备宿主显式消费同轮 Android 候选且独立留证
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+name: expo-build
+
+on:
+  pull_request:
+    paths: &expo-paths
+      - '.github/workflows/expo_build.yml'
+      - '.github/actions/setup-cli/**'
+      - '.gitmodules'
+      - 'package.json'
+      - 'rn-update.podspec'
+      - 'react-native.config.js'
+      - 'expo-module.config.json'
+      - 'app.plugin.js'
+      - 'check-expo-version.js'
+      - 'src/**'
+      - 'ios/**'
+      - 'android/**'
+      - 'cpp/**'
+      - 'scripts/**'
+      - 'Example/expoUsePakta/**'
+      - 'Example/e2etest/**'
+  push:
+    branches: [master, main, 'codex/verify-*']
+    paths: *expo-paths
+  workflow_dispatch:
+    inputs:
+      cli_ref:
+        description: Public rn-update-cli branch, tag or commit (repository variable is the fallback)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+    working-directory: Example/expoUsePakta
+
+jobs:
+  expo-build:
+    name: Expo Release (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            runner: ubuntu-latest
+          - platform: ios
+            runner: macos-26
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+      - name: Set up Xcode
+        if: matrix.platform == 'ios'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.4'
+      - name: Set up Java
+        if: matrix.platform == 'android'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        if: matrix.platform == 'android'
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - name: Install Expo example dependencies
+        run: bun install --frozen-lockfile
+      - name: Link the current SDK without its development dependencies
+        # 隔离副本位于消费端内，原生解析沿宿主 node_modules 找 Expo/RN，避免根 RN0.73 污染。
+        # 不运行 SDK install/prepack；这是源码集成编译，不冒充发布候选消费。
+        run: |
+          set -euo pipefail
+          sdk="$GITHUB_WORKSPACE"
+          local_sdk="$PWD/.expo-ci/local-rn-update"
+          mkdir -p "$local_sdk"
+          cp "$sdk"/package.json "$sdk"/rn-update.podspec "$sdk"/react-native.config.js \
+            "$sdk"/expo-module.config.json "$sdk"/app.plugin.js "$sdk"/check-expo-version.js "$local_sdk/"
+          rsync -a --exclude='.git' "$sdk/src" "$sdk/ios" "$sdk/android" "$sdk/cpp" "$local_sdk/"
+          rm -rf node_modules/rn-update
+          ln -s ../.expo-ci/local-rn-update node_modules/rn-update
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const root = fs.realpathSync('node_modules/rn-update');
+          assert.equal(root, fs.realpathSync('.expo-ci/local-rn-update'));
+          for (const name of ['react-native', 'expo']) {
+            const host = fs.realpathSync(require.resolve(`${name}/package.json`));
+            const linked = fs.realpathSync(require.resolve(`${name}/package.json`, {paths: [root]}));
+            assert.equal(linked, host, `${name} must resolve from the consumer`);
+          }
+          for (const file of ['src/NativePakta.ts', 'app.plugin.js', 'expo-module.config.json', 'rn-update.podspec']) {
+            assert.deepEqual(fs.readFileSync(path.join(root, file)), fs.readFileSync(path.join(process.env.GITHUB_WORKSPACE, file)));
+          }
+          NODE
+      - name: Generate the Android project
+        if: matrix.platform == 'android'
+        run: CI=1 bunx expo prebuild --platform android --no-install
+      - name: Build Android Release
+        if: matrix.platform == 'android'
+        run: |
+          set -euo pipefail
+          cd android
+          ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --console=plain --stacktrace 2>&1 | tee ../android-build.log
+      - name: Generate the iOS project
+        if: matrix.platform == 'ios'
+        run: CI=1 bunx expo prebuild --platform ios --no-install
+      - name: Install CocoaPods dependencies
+        if: matrix.platform == 'ios'
+        env:
+          LANG: en_US.UTF-8
+          RCT_NEW_ARCH_ENABLED: '1'
+        run: cd ios && pod install
+      - name: Assert the Expo Apple integration was selected
+        if: matrix.platform == 'ios'
+        run: |
+          set -euo pipefail
+          grep -F 'rn-update/Expo' ios/Podfile.lock
+          grep -F 'EXPO_SUPPORTS_BUNDLEURL' 'ios/Pods/Target Support Files/rn-update/rn-update.release.xcconfig'
+          grep -F 'ExpoPaktaReactDelegateHandler' 'ios/Pods/Target Support Files/Pods-expoUsePakta/ExpoModulesProvider.swift'
+      - name: Build iOS Release for simulator
+        if: matrix.platform == 'ios'
+        run: |
+          set -euo pipefail
+          cd ios
+          xcodebuild -workspace expoUsePakta.xcworkspace -scheme expoUsePakta \
+            -configuration Release -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build | tee ../ios-build.log
+      - name: Preserve failing build logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: expo-build-logs-${{ matrix.platform }}
+          path: |
+            Example/expoUsePakta/*-build.log
+            Example/expoUsePakta/android/build/reports/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  expo-android-runtime:
+    name: Expo57 Android real bad-JS rescue
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+        working-directory: .
+    env:
+      NDK_VERSION: 28.2.13676358
+      EXPO_NO_TELEMETRY: '1'
+      RNU_METRO_MAX_WORKERS: '1'
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Prepare a same-run Android-only SDK candidate
+        run: |
+          set -euo pipefail
+          echo y | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION"
+          bun install --frozen-lockfile
+          bun run build:types
+          rm -rf android/lib android/obj
+          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION" bash scripts/build-android-so.sh
+          candidate_dir="$RUNNER_TEMP/expo-android-candidate"
+          mkdir -p "$candidate_dir"
+          (cd android/lib && sha256sum */librnupdate.so) > "$candidate_dir/SHA256SUMS"
+          npm pack --ignore-scripts --pack-destination "$candidate_dir" --json > "$candidate_dir/pack.json"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const assert = require('node:assert/strict');
+          const {readCandidate} = require('./scripts/package-candidate');
+          const directory = path.join(process.env.RUNNER_TEMP, 'expo-android-candidate');
+          const packed = JSON.parse(fs.readFileSync(path.join(directory, 'pack.json'), 'utf8'));
+          if (packed.length !== 1) throw new Error('Expected one Android validation candidate');
+          const candidate = readCandidate(path.join(directory, packed[0].filename));
+          for (const abi of ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']) {
+            const file = `android/lib/${abi}/librnupdate.so`;
+            assert.deepEqual(candidate.readFile(file), fs.readFileSync(file), `${abi} must use this run's library`);
+          }
+          fs.writeFileSync(path.join(directory, 'candidate.json'), JSON.stringify({
+            tarball: candidate.tarball, sha256: candidate.sha256,
+            version: candidate.metadata.version, androidOnly: true,
+          }, null, 2) + '\n');
+          fs.appendFileSync(process.env.GITHUB_ENV, `RNU_SDK_TARBALL=${candidate.tarball}\nRNU_SDK_SHA256=${candidate.sha256}\n`);
+          NODE
+      - name: Install the shared rescue artifact verifier dependencies
+        run: cd Example/e2etest && bun install --frozen-lockfile
+      - name: Verify the Expo generator and installed-input guards
+        run: node --test Example/e2etest/scripts/expo-e2e-project.test.js
+      - name: Generate and install a fresh Expo57 probe
+        run: |
+          set -euo pipefail
+          node Example/e2etest/scripts/create-expo-e2e-project.js \
+            --source "$GITHUB_WORKSPACE/Example/e2etest" \
+            --project "$RUNNER_TEMP/pakta-expo-probe" \
+            --sdk-tarball "$RNU_SDK_TARBALL" --sdk-sha256 "$RNU_SDK_SHA256"
+          cd "$RUNNER_TEMP/pakta-expo-probe"
+          npm install --no-audit --no-fund | tee npm-install.log
+          CI=1 node node_modules/expo/bin/cli prebuild --platform android --no-install | tee prebuild.log
+          node "$GITHUB_WORKSPACE/Example/e2etest/scripts/assert-expo-e2e-project.js" \
+            --project "$RUNNER_TEMP/pakta-expo-probe" --sdk-sha256 "$RNU_SDK_SHA256"
+      - name: Install the current CLI
+        uses: ./.github/actions/setup-cli
+        with:
+          ref: ${{ inputs.cli_ref || vars.RNU_CLI_REF || 'main' }}
+      - name: Compile the Expo57 x86_64 Release APK
+        working-directory: ${{ runner.temp }}/pakta-expo-probe/android
+        run: |
+          set -euo pipefail
+          bash gradlew :app:assembleRelease -PreactNativeArchitectures=x86_64 --max-workers=1 --no-parallel --no-daemon --console=plain --stacktrace 2>&1 | tee ../android-build.log
+      - name: Run real Expo bad-JS crash rescue
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          avd-name: expo-api36
+          emulator-build: 15507667
+          emulator-boot-timeout: 900
+          script: |
+            node "$GITHUB_WORKSPACE/Example/e2etest/scripts/run-android-crash-rescue.js" --project "$RUNNER_TEMP/pakta-expo-probe" --cli "$GITHUB_WORKSPACE/.ci/rn-update-cli" --apk "$RUNNER_TEMP/pakta-expo-probe/android/app/build/outputs/apk/release/app-release.apk" --serial "$(adb get-serialno)" --package space.yoghourt.pakta.expoprobe --bundler expo --output "$RUNNER_TEMP/pakta-expo-probe/crash-rescue-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+      - name: Preserve Expo device input and rescue evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: expo57-android-crash-rescue-evidence
+          path: |
+            ${{ runner.temp }}/expo-android-candidate
+            ${{ runner.temp }}/pakta-expo-probe/expo-e2e-project.json
+            ${{ runner.temp }}/pakta-expo-probe/expo-e2e-validation.json
+            ${{ runner.temp }}/pakta-expo-probe/package-lock.json
+            ${{ runner.temp }}/pakta-expo-probe/*.log
+            ${{ runner.temp }}/pakta-expo-probe/android/app/build/outputs/apk/release/app-release.apk
+            ${{ runner.temp }}/pakta-expo-probe/crash-rescue-*
+          if-no-files-found: warn
+          retention-days: 7

@@ -15,6 +15,7 @@
 -keep class cn.reactnative.modules.update.StateCoreResult { <init>(); <fields>; }
 -keep class cn.reactnative.modules.update.ArchivePatchPlanResult { <init>(); <fields>; }
 -keep class cn.reactnative.modules.update.CopyGroupResult { <init>(); <fields>; }
+-keep class cn.reactnative.modules.update.FileOperationException { <init>(java.lang.String); }
 
 # JNI entry points are bound by their mangled Java names.
 -keepclasseswithmembernames class cn.reactnative.modules.update.** {

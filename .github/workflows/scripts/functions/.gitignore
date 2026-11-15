@@ -1,0 +1,14 @@
+# [INPUT]: 依赖 Firebase Functions TypeScript 构建与 Bun 依赖安装流程
+# [OUTPUT]: 排除编译产物、声明文件缓存与本地依赖目录，保留可复现的 bun.lock
+# [POS]: functions 测试夹具的工作区卫生边界，不参与运行时逻辑
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+# Compiled JavaScript files
+lib/**/*.js
+lib/**/*.js.map
+
+# TypeScript v1 declaration files
+typings/
+
+# Node.js dependency directory
+node_modules/
+yarn.lock

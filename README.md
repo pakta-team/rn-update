@@ -126,6 +126,15 @@ The exported [`ClientOptions`](./src/type.ts) covers hooks, retries, localizatio
 ## Advanced configuration
 
 <details>
+<summary><strong>Bound native host preparation</strong></summary>
+
+After resolving the real launch bundle, native hosts can use Android `PaktaNativeUpdate.checkAndUpdate(context, 1500, callback)` or Harmony `provider.checkAndUpdate(1500)` to wait up to 1500 ms. Both existing no-timeout signatures now default to 30 minutes. Do not resolve the launch bundle again just to call these APIs: resolution consumes first-load and rollback markers.
+
+`failed / timeout` means this caller stopped waiting. The shared round can still complete for the next launch, subject to configuration/reset checks; it does not reload the running React Native instance. Other callers retain their own deadlines.
+
+</details>
+
+<details>
 <summary><strong>Health checks, crash recovery and error reporting</strong></summary>
 
 - The Provider marks success after 1000 ms by default. Use `autoMarkSuccessDelayMs` and `healthCheck` for delayed critical initialization; returning `false` keeps crash protection armed.

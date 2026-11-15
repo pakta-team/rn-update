@@ -8,8 +8,8 @@ podspec_dir = File.dirname(__FILE__)
 
 =begin
 [INPUT]: 依赖 package.json 的包元数据，以及 CocoaPods、React Native、Expo 与共享 C++ 内核的原生接口。
-[OUTPUT]: 对外提供 rn-update 的 CocoaPods 规格、iOS 原生源文件、资源包与条件式 Expo 接入。
-[POS]: SDK 发布边界，负责把 npm 包版本映射到 Apple 原生依赖与资源；Android、HarmonyOS 与 JavaScript 实现由同级目录独立维护。
+[OUTPUT]: 对外提供 rn-update 的 CocoaPods 规格、iOS 原生源文件、PaktaPrivacy 隐私资源包与条件式 Expo 接入。
+[POS]: SDK 发布边界，把 npm 包版本映射到公开仓库 v 前缀标签、Apple 原生依赖与资源。
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 =end
 
@@ -67,9 +67,17 @@ Pod::Spec.new do |s|
   final_ios_deployment_target =
     defined?(min_ios_version_supported) ? min_ios_version_supported : '11.0'
 
+  final_tvos_deployment_target = begin
+    target = min_supported_versions[:tvos] if defined?(min_supported_versions)
+    target && Gem::Version.correct?(target.to_s) ? target.to_s : '15.1'
+  rescue
+    '15.1'
+  end
+
   if valid_expo_project
     # --- Try to find and parse ExpoModulesCore.podspec only if it's an Expo project ---
     parsed_expo_ios_target = nil
+    parsed_expo_tvos_target = nil
     expo_modules_core_podspec_path = begin
         package_json_path = `node -p "#{expo_modules_core_package_json_js}"`.strip
         File.join(File.dirname(package_json_path), 'ExpoModulesCore.podspec') if $?.success? && package_json_path && !package_json_path.empty?
@@ -80,6 +88,12 @@ Pod::Spec.new do |s|
     if expo_modules_core_podspec_path && File.exist?(expo_modules_core_podspec_path)
       begin
         content = File.read(expo_modules_core_podspec_path)
+        platforms = content.match(/s\.platforms\s*=\s*\{([^}]*)\}/m)
+        tvos_match = platforms && platforms[1].match(/:tvos\s*=>\s*'([^']+)'/)
+        tvos_match ||= content.match(/s\.platform\s*=\s*:tvos,\s*'([^']+)'/)
+        if tvos_match && Gem::Version.correct?(tvos_match[1])
+          parsed_expo_tvos_target = tvos_match[1]
+        end
         match = content.match(/s\.platforms\s*=\s*\{[\s\S]*?:ios\s*=>\s*'([^\']+)'/) # Match within s.platforms hash
         if match && match[1]
           parsed_expo_ios_target = match[1]
@@ -96,12 +110,16 @@ Pod::Spec.new do |s|
     if parsed_expo_ios_target
         final_ios_deployment_target = parsed_expo_ios_target
     end
+    if parsed_expo_tvos_target
+        final_tvos_deployment_target = parsed_expo_tvos_target
+    end
   end
 
   # tvOS (react-native-tvos) shares the iOS sources; the only platform
   # differences live behind TARGET_OS_TV in RCTPakta.mm (download directory,
   # purged-cache recovery).
-  s.platforms = { :ios => final_ios_deployment_target, :tvos => final_ios_deployment_target }
+  s.platforms = { :ios => final_ios_deployment_target, :tvos => final_tvos_deployment_target }
+  s.tvos.frameworks = 'Network'
 
   s.name         = package['name']
   s.version      = package['version']
@@ -113,7 +131,7 @@ Pod::Spec.new do |s|
 
   s.cocoapods_version = '>= 1.6.0'
 
-  s.source = { :git => 'https://github.com/pakta-team/rn-update.git', :tag => "#{s.version}" }
+  s.source = { :git => 'https://github.com/pakta-team/rn-update.git', :tag => "v#{s.version}" }
 
   s.libraries = 'bz2', 'z'
   # No search path into the pod source: every include under ios/ resolves
@@ -154,7 +172,7 @@ Pod::Spec.new do |s|
   # Privacy manifest (required-reason APIs: disk space, file timestamps,
   # system boot time, user defaults) delivered as its own resource bundle so
   # static and dynamic integrations both carry it.
-  s.resource_bundles = { 'react-native-update_privacy' => ['ios/PrivacyInfo.xcprivacy'] }
+  s.resource_bundles = { 'PaktaPrivacy' => ['ios/PrivacyInfo.xcprivacy'] }
 
   s.dependency 'React'
   s.dependency "React-Core"
@@ -173,15 +191,23 @@ Pod::Spec.new do |s|
   end
 
   s.subspec 'RCTPakta' do |ss|
+    ss.preserve_paths = 'ios/RCTPakta/*.inc'
     ss.source_files = ['ios/RCTPakta/*.{h,m,mm}',
                        'cpp/update_flow_core/flow_json.{h,cpp}',
+                       'cpp/update_flow_core/native_config.{h,cpp}',
+                       'cpp/update_flow_core/native_round.{h,cpp}',
+                       'cpp/update_flow_core/round_engine.{h,cpp}',
                        'cpp/update_flow_core/update_flow_core.{h,cpp}',
                        'cpp/patch_core/archive_patch_core.{h,cpp}',
+                       'cpp/patch_core/archive_limits.{h,cpp}',
+                       'cpp/patch_core/install_record.{h,cpp}',
+                       'cpp/patch_core/patch_manifest.{h,cpp}',
                        'cpp/patch_core/digest.{h,cpp}',
                        'cpp/patch_core/hbc_transform.{h,cpp}',
                        'cpp/patch_core/hbc_transform_wire.{h,cpp}',
                        'cpp/patch_core/patch_core.{h,cpp}',
                        'cpp/patch_core/state_core.{h,cpp}',
+                       'cpp/patch_core/resume_plan.{h,cpp}',
                        'android/jni/hpatch.{h,c}',
                        'android/jni/HDiffPatch/libHDiffPatch/HPatch/*.{h,c}',
                        'android/jni/HDiffPatch/file_for_patch.{h,c}',

@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "nativeErrors": {
+    "InvalidOptions": "INVALID_OPTIONS",
+    "DownloadFailed": "DOWNLOAD_FAILED",
+    "PatchFailed": "PATCH_FAILED",
+    "FileOperationFailed": "FILE_OPERATION_FAILED",
+    "SwitchVersionFailed": "SWITCH_VERSION_FAILED",
+    "MarkSuccessFailed": "MARK_SUCCESS_FAILED",
+    "RestartFailed": "RESTART_FAILED",
+    "ResetFailed": "RESET_FAILED",
+    "InvalidHashInfo": "INVALID_HASH_INFO",
+    "UnsupportedPlatform": "UNSUPPORTED_PLATFORM",
+    "ApkInstallPermissionRequired": "APK_INSTALL_PERMISSION_REQUIRED",
+    "ApkInstallFailed": "APK_INSTALL_FAILED"
+  },
+  "jsErrors": [
+    "MODULE_NOT_LOADED", "APPKEY_REQUIRED", "NO_ENDPOINTS", "HTTP_STATUS",
+    "INVALID_RESPONSE", "CHECK_FAILED", "DOWNLOAD_FAILED", "SWITCH_VERSION_FAILED",
+    "MARK_SUCCESS_FAILED", "APK_INSTALL_PENDING", "APK_DOWNLOAD_FAILED",
+    "USER_HOOK_ERROR", "SINGLETON_VIOLATION", "INVALID_OPTIONS", "PATCH_FAILED",
+    "FILE_OPERATION_FAILED", "RESTART_FAILED", "RESET_FAILED", "INVALID_HASH_INFO",
+    "UNSUPPORTED_PLATFORM", "APK_INSTALL_PERMISSION_REQUIRED", "APK_INSTALL_FAILED"
+  ],
+  "archiveLimits": {
+    "MaxArchiveBytes": 536870912,
+    "MaxTotalUncompressedBytes": 2147483648,
+    "MaxEntryBytes": 536870912,
+    "MaxEntries": 20000,
+    "MaxCompressionRatio": 100,
+    "RatioCheckMinBytes": 1048576,
+    "MaxManifestBytes": 16777216,
+    "FreeDiskMarginBytes": 67108864,
+    "UnknownLengthFreeSpaceProbeBytes": 8388608
+  },
+  "stateOperations": {
+    "SwitchVersion": 1, "MarkSuccess": 2, "Rollback": 3,
+    "ClearFirstTime": 4, "ClearRollbackMark": 5, "ResolveLaunch": 6
+  },
+  "archivePatchTypes": { "Full": 1, "PatchFromPackage": 2, "PatchFromPpk": 3 },
+  "taskTypes": { "Cleanup": 0, "PatchFull": 1, "PatchFromPackage": 2, "PatchFromPpk": 3, "PlainDownload": 4 },
+  "wireVersions": { "HbcTransformSupportedVersion": 1, "SupportedDiffVersion": 2 },
+  "installRecord": { "Schema": 1, "FileName": ".pakta-complete", "StagingSuffix": ".staging" },
+  "endpointBudget": { "maxRequests": 8, "hedgeDelayMs": 250 },
+  "androidAbis": [
+    { "name": "arm64-v8a", "machine": 183, "minPageAlignment": 16384 },
+    { "name": "armeabi-v7a", "machine": 40, "minPageAlignment": 0 },
+    { "name": "x86", "machine": 3, "minPageAlignment": 0 },
+    { "name": "x86_64", "machine": 62, "minPageAlignment": 16384 }
+  ],
+  "lifecycle": {
+    "mode": "facts-only",
+    "android": {
+      "source": "android/src/main/java/cn/reactnative/modules/update/UpdateContext.java",
+      "namespace": "update",
+      "keys": ["uuid", "nativeConfig", "nativeCheckResp", "packageVersion", "buildTime", "binaryChannel", "currentVersion", "lastVersion", "firstTime", "firstTimeOk", "rolledBackVersion", "firstLoadMarked", "hash_*", "bundleHashCache"],
+      "reset": "selectively remove firstLoadMarked, nativeCheckResp and hash_*; apply reset state and binaryChannel; preserve uuid/nativeConfig/bundleHashCache, breadcrumb and unknown installation KV; never clear store",
+      "binaryChange": "queue existing cleanup; same selective removal as reset; apply binary state and binaryChannel; preserve installation KV",
+      "channelChange": "same selective removal as binary change; apply reset state and binaryChannel; preserve installation KV",
+      "directories": "_update; reset queues cleanup maxAgeDays=0; keep names resolved at execution, including launchVersion"
+    },
+    "harmony": {
+      "source": "harmony/pakta/src/main/ets/UpdateContext.ts",
+      "keys": ["uuid", "nativeConfig", "nativeCheckResp", "packageVersion", "buildTime", "binaryChannel", "currentVersion", "lastVersion", "firstTime", "firstTimeOk", "rolledBackVersion", "firstLoadMarked", "hash_*", "bundleHashCache"],
+      "reset": "selectively remove firstLoadMarked, nativeCheckResp and enumerated hash_*; write reset state and binaryChannel in one flush; preserve uuid/nativeConfig/bundleHashCache, breadcrumb and unknown installation KV; never clear store",
+      "binaryChange": "queue existing cleanup; same selective removal as reset; write binary state; missing or throwing getAllSync leaves hash_* orphans only",
+      "channelChange": "same selective removal as binary change; force reset state and persist binaryChannel; preserve installation KV",
+      "directories": "reset queues cleanup maxAgeDays=0 preserving launchVersion; regular cleanup age=3 days"
+    },
+    "apple": {
+      "source": "ios/RCTPakta/RCTPakta.mm",
+      "keys": ["REACTNATIVECN_PAKTA_INFO_KEY", "REACTNATIVECN_PAKTA_UUID", "REACTNATIVECN_PAKTA_HASH_*", "REACTNATIVECN_PAKTA_FIRSTLOADMARKED_KEY", "REACTNATIVECN_PAKTA_ROLLEDBACKMARKED_KEY", "REACTNATIVECN_PAKTA_ISPACKAGEUPDATEDMARKED_KEY", "REACTNATIVECN_PAKTA_BUNDLEHASH_KEY", "REACTNATIVECN_PAKTA_NATIVE_CONFIG_KEY", "REACTNATIVECN_PAKTA_NATIVE_CHECK_RESP_KEY", "REACTNATIVECN_PAKTA_NATIVE_CHECK_INCOMPLETE_KEY", "REACTNATIVECN_PAKTA_BINARY_CHANNEL"],
+      "reset": "reset state; selectively remove hash metadata, first-load/package-updated markers and check response cache; persist binaryChannel; preserve uuid/nativeConfig/bundle hash cache/incomplete breadcrumb and unrelated defaults",
+      "binaryChange": "same selective cleanup as reset except package-updated marker is set; apply SyncBinaryVersion state; preserve installation defaults and incomplete breadcrumb",
+      "channelChange": "same selective cleanup as binary change; clear current/last/rollback and set package-updated marker/binaryChannel; preserve installation defaults and incomplete breadcrumb",
+      "directories": "existing update root; preserve current process launch directory during reset; tvOS purge-restore unchanged"
+    }
+  }
+}

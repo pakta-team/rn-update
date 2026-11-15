@@ -1,8 +1,9 @@
 # [INPUT]: 依赖 Android/iOS/Harmony 构建、C++ 测试与 Metro 本地开发流程
-# [OUTPUT]: 排除客户端构建中间物、临时测试制品、Metro 缓存、IDE 状态和平台生成目录
+# [OUTPUT]: 排除本地凭据/自动化配置、构建中间物、编译声明、临时测试制品与缓存；保留可共享的 CLAUDE 地图
 # [POS]: rn-update 工作区卫生配置，不改变 npm 发布内容
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 .vscode
+/dist/
 android/build
 android/obj
 android/.cxx
@@ -86,10 +87,16 @@ package
 
 # Build outputs of scripts/test-patch-core.sh and scripts/test-update-flow-core.sh
 .tmp/
+__pycache__/
+.pytest_cache/
+*.pyc
+hs_err_pid*.log
+replay_pid*.log
 
-# 内部 Agent 地图与本地自动化不得进入公开仓库。
-**/CLAUDE.md
+# 本地自动化和凭据保留在工作区；共享架构地图允许受控。
 **/AGENTS.md
 **/.agents/
+**/.claude/
 **/.mcp.json
 **/sentry.properties
+/.ci/

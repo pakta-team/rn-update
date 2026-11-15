@@ -222,6 +222,32 @@ describe('UpdateProvider <-> Pakta contract', () => {
     expect(checkUpdate).toHaveBeenCalledTimes(1);
   });
 
+  test('无参切换优先已下载 hash 而非最近检查结果', async () => {
+    const { client, UpdateProvider } = await setupRealClient({
+      checkStrategy: null,
+      autoMarkSuccess: false,
+    });
+    client.getDownloadedHash = mock(() => 'downloaded-hash');
+    client.switchVersion = mock(async () => true);
+    client.switchVersionLater = mock(async () => {});
+    const captured: { current?: any } = {};
+    const Probe = () => {
+      captured.current = useUpdate();
+      return null;
+    };
+    const renderer = await renderProvider(UpdateProvider, client, <Probe />);
+    try {
+      await TestRenderer.act(async () => {
+        await captured.current.switchVersion();
+        await captured.current.switchVersionLater();
+      });
+      expect(client.switchVersion).toHaveBeenCalledWith('downloaded-hash');
+      expect(client.switchVersionLater).toHaveBeenCalledWith('downloaded-hash');
+    } finally {
+      TestRenderer.act(() => renderer.unmount());
+    }
+  });
+
   test('changing dismissErrorAfter reschedules a running dismiss timer', async () => {
     (globalThis as any).fetch = mock(async () => {
       throw new Error('offline');

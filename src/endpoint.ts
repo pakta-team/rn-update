@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 UpdateError 统一失败语义，并依赖 updateFlowCore 的端点去重与候选排序纯规则
- * [OUTPUT]: 对外提供端点尝试结果类型、DEFAULT_HEDGE_DELAY_MS、最快成功选择器、dedupeEndpoints 与 executeEndpointFallback
- * [POS]: src 的网络韧性适配层，在业务请求外包裹并发 hedge、超时、失败聚合与确定性回退，主要由 client 消费
+ * [INPUT]: 依赖 UpdateError 统一失败语义与 updateFlowCore 的端点纯规则；hedge 延迟和总请求上限由 scripts/contract.json 的 endpointBudget 派生，无运行时脚本依赖
+ * [OUTPUT]: 对外提供端点尝试结果类型、DEFAULT_HEDGE_DELAY_MS、MAX_ENDPOINT_REQUESTS、最快成功选择器、dedupeEndpoints 与带总请求预算的 executeEndpointFallback
+ * [POS]: src 的网络韧性适配层，在业务请求外包裹并发 hedge、超时、失败聚合、请求上限与确定性回退，主要由 client 消费
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { UpdateError } from './error';
@@ -28,6 +28,7 @@ export interface ExecuteEndpointFallbackOptions<T> {
   random?: () => number;
   now?: () => number;
   hedgeDelayMs?: number;
+  maxRequests?: number;
   onFirstFailure?: (failure: EndpointAttemptFailure) => void | Promise<void>;
 }
 
@@ -39,6 +40,15 @@ const normalizeError = (error: unknown) => {
 };
 
 export const DEFAULT_HEDGE_DELAY_MS = 250;
+
+/**
+ * Endpoint requests one check may issue in total, as the native round's
+ * flowcore::kMaxQueryRequests (cpp/update_flow_core/native_round.h). The
+ * remote list comes from a public mirror: without a bound, a long (or
+ * hostile) list would make every device fan out to all of its entries on
+ * each failed check.
+ */
+export const MAX_ENDPOINT_REQUESTS = 8;
 
 /**
  * Hedged race over the candidate endpoints: the first candidate starts
@@ -145,6 +155,7 @@ export async function executeEndpointFallback<T>({
   random = Math.random,
   now = Date.now,
   hedgeDelayMs = DEFAULT_HEDGE_DELAY_MS,
+  maxRequests = MAX_ENDPOINT_REQUESTS,
   onFirstFailure,
 }: ExecuteEndpointFallbackOptions<T>): Promise<EndpointAttemptSuccess<T>> {
   const excludedEndpoints = new Set<string>();
@@ -152,7 +163,8 @@ export async function executeEndpointFallback<T>({
   // is pure policy; this side only executes it.
   let candidates = orderEndpointCandidates(configuredEndpoints, random());
 
-  if (!candidates.length) {
+  // No budget means no request at all, like no endpoint.
+  if (!candidates.length || maxRequests < 1) {
     throw new UpdateError(i18n.t('error_no_endpoints'), 'NO_ENDPOINTS');
   }
 
@@ -174,12 +186,15 @@ export async function executeEndpointFallback<T>({
     let lastError = firstFailure.error;
 
     while (true) {
+      if (excludedEndpoints.size >= maxRequests) {
+        throw lastError;
+      }
       const remoteEndpoints = getRemoteEndpoints
         ? await getRemoteEndpoints().catch(() => [])
         : [];
-      candidates = dedupeEndpoints([...candidates, ...remoteEndpoints]).filter(
-        (endpoint) => !excludedEndpoints.has(endpoint)
-      );
+      candidates = dedupeEndpoints([...candidates, ...remoteEndpoints])
+        .filter((endpoint) => !excludedEndpoints.has(endpoint))
+        .slice(0, maxRequests - excludedEndpoints.size);
 
       if (!candidates.length) {
         throw lastError;

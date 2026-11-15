@@ -1,19 +1,24 @@
 /**
- * [INPUT]: 依赖 bun:test、node:fs/node:vm 与 Bun.Transpiler，以 VM 隔离运行真实 UpdateContext.ts（preferences 假体）与三端归一化器
+ * [INPUT]: 依赖 bun:test、VM 与真实配置共享核，准备钩子先编译宿主，再隔离运行 Harmony 适配器和 UpdateContext
  * [OUTPUT]: 提供 normalizeNativeUpdateConfig 与 setNativeConfig 落库/代际失效/重复幂等的无桥配置回归断言
  * [POS]: __tests__ 的无桥配置套件，锁定三端镜像归一化器与 JS 侧配置持久化之间的契约
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-import { describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import type { NativeUpdateConfig } from '../../harmony/pakta/src/main/ets/NativeUpdateConfig';
-import { normalizeNativeUpdateConfig } from '../../harmony/pakta/src/main/ets/NativeUpdateConfig';
+import { configCore, normalizeConfiguration } from './nativeConfigHost';
+
+beforeAll(() => {
+  configCore('normalize', ['{"appKey":"fixture"}']);
+}, 30000);
+
+type NativeUpdateConfig = Record<string, unknown>;
 
 function runtimeSource(relativePath: string): string {
   const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8')
     .replace(/^import[\s\S]*?;\r?\n/gm, '')
-    .replace(/^export\s*\{[^}]*\}(?:\s*from\s*[^;]*)?;\r?\n/gm, '')
+    .replace(/^export\s*(?:type\s*)?\{[^}]*\}(?:\s*from\s*[^;]*)?;\r?\n/gm, '')
     .replace(/^export /gm, '');
   return new Bun.Transpiler({ loader: 'ts' }).transformSync(source);
 }
@@ -21,7 +26,21 @@ function runtimeSource(relativePath: string): string {
 const storeSource = runtimeSource(
   '../../harmony/pakta/src/main/ets/UpdateContext.ts'
 );
-const clientSource = runtimeSource('../client.ts');
+const normalizeNativeUpdateConfig = runInNewContext(
+  `${runtimeSource('../../harmony/pakta/src/main/ets/NativeUpdateConfig.ts')}\nnormalizeNativeUpdateConfig`,
+  { NativePatchCore: { normalizeConfiguration } }
+) as (options: NativeUpdateConfig) => string;
+const clientSource = [
+  '../clientState.ts',
+  '../clientReporter.ts',
+  '../clientNativeConfig.ts',
+  '../clientCheck.ts',
+  '../clientDownload.ts',
+  '../clientActivation.ts',
+  '../client.ts',
+]
+  .map(runtimeSource)
+  .join('\n');
 
 interface ConfigStore {
   setNativeConfig: (config: string) => Promise<void>;
@@ -50,7 +69,7 @@ function storeHarness() {
     },
   };
   const store = runInNewContext(
-    `${storeSource}\nconst store = Object.create(UpdateContext.prototype); store.preferences = preferences; store.flushBatchDepth = 0; store;`,
+    `${storeSource}\nconst store = Object.create(UpdateContext.prototype); store.taskChain = Promise.resolve(); store.preferences = preferences; store.flushBatchDepth = 0; store;`,
     {
       preferences,
       util: { generateRandomUUID: () => 'native-installation-id' },
@@ -111,6 +130,15 @@ describe('native configuration normalization', () => {
     expect(config.afterDownload).toBe('none');
     expect(config.disabled).toBe(false);
     expect(config.packageVersion).toBeUndefined();
+    expect(Object.keys(config).sort()).toEqual([
+      'afterDownload',
+      'appKey',
+      'disabled',
+      'endpoints',
+      'queryUrls',
+      'rn',
+      'rnu',
+    ]);
   });
 
   test('custom endpoints do not inherit public discovery, and are deduplicated', () => {
@@ -166,6 +194,9 @@ describe('native configuration normalization', () => {
     ['wrong disabled type', { appKey: 'a', disabled: 'false' }],
     ['blank package version', { appKey: 'a', packageVersion: '' }],
     ['unknown option', { appKey: 'a', endponts: ['https://example.com'] }],
+    ['fixed host channel', { appKey: 'a', channel: 'other' }],
+    ['null channel', { appKey: 'a', channel: null }],
+    ['undefined channel', { appKey: 'a', channel: undefined }],
   ] as const) {
     test(`rejects ${name} before storage is touched`, () => {
       expect(() =>
@@ -173,6 +204,53 @@ describe('native configuration normalization', () => {
       ).toThrow();
     });
   }
+});
+
+describe('shared configuration features', () => {
+  test('internal channel stays available but fixed-host mode rejects even default and null', () => {
+    for (const channel of ['default', 'other', null]) {
+      const input = JSON.stringify({ appKey: 'a', channel });
+      expect(configCore('normalize', [input])).toEqual({
+        error: 'Invalid native configuration: unknown option channel',
+      });
+    }
+    const internal = configCore('normalize', [
+      '{"appKey":"a","channel":"internal"}',
+      true,
+    ]) as { value: string };
+    expect(JSON.parse(internal.value).channel).toBe('internal');
+  });
+
+  test('JS whitespace, gate truthiness and malformed persisted JSON use shared semantics', () => {
+    expect(configCore('normalize', ['{"appKey":"\\u00a0\\ufeff"}'])).toEqual({
+      error:
+        'Invalid native configuration: appKey must be a string and must not be blank',
+    });
+    for (const [json, expected] of [
+      ['', { status: 'skipped', reason: 'not_configured' }],
+      ['[]', { status: 'failed', reason: 'invalid_config' }],
+      ['{"appKey":" "}', { status: 'failed', reason: 'invalid_config' }],
+      [
+        '{"appKey":"a","disabled":"false"}',
+        { status: 'skipped', reason: 'disabled' },
+      ],
+      ['{"appKey":" a "}', { appKey: 'a' }],
+    ] as const)
+      expect(JSON.parse(configCore('gate', [json]) as string)).toEqual(
+        expected
+      );
+  });
+
+  test('equivalence ignores defaults/key order/slashes but not identities; A-B-A cancels', () => {
+    const a = '{"appKey":"a","endpoints":["https://a/"]}';
+    const b =
+      '{"endpoints":["https://a","https://a/"],"appKey":"a","disabled":false,"channel":"default"}';
+    expect(configCore('equivalent', [a, b])).toBe(true);
+    expect(configCore('equivalent', ['', ''])).toBe(false);
+    expect(configCore('cancel', [a, b, a, 1, 1, 2, 2])).toBe('');
+    expect(configCore('cancel', [a, b, a, 1, 3, 2, 4])).toBe('config_changed');
+    expect(configCore('cancel', [a, b, a, 1, 1, 2, 4])).toBe('reset');
+  });
 });
 
 describe('actual native configuration store', () => {

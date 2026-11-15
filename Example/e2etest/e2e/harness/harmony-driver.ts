@@ -1,11 +1,15 @@
 /**
- * [INPUT]: 依赖 hdc/uitest 命令、Node child_process 与 Harmony 布局 JSON
+ * [INPUT]: 依赖 hdc/uitest 命令、Node child_process、Harmony 布局 JSON 与共享安装成功门卫
  * [OUTPUT]: 对外提供 UiNode、WaitOptions 和带启动稳定窗口的 HarmonyDriver 设备交互原语
  * [POS]: Harmony e2e 测试与真实设备之间的唯一驱动适配层
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+
+const {
+  assertHdcInstallSuccess,
+} = require('../../scripts/harmony-e2e-results');
 
 const execFileAsync = promisify(execFile);
 
@@ -144,7 +148,10 @@ export class HarmonyDriver {
     const output = await this.shell(
       `aa start -b ${this.bundleName} -a ${this.abilityName}`
     );
-    if (!output.includes('successfully')) {
+    if (
+      !/\bsuccessfully\b/i.test(output) ||
+      /\b(?:fail(?:ed|ure)?|error)\b/i.test(output)
+    ) {
       throw new Error(`Failed to launch ${this.bundleName}: ${output.trim()}`);
     }
     // RNOH 的 uitest 广播服务在 Ability 成功返回后仍需短暂初始化；
@@ -164,9 +171,7 @@ export class HarmonyDriver {
 
   async installHap(hapPath: string): Promise<void> {
     const output = await this.hdc('install', '-r', hapPath);
-    if (!/successfully/i.test(output)) {
-      throw new Error(`hdc install failed: ${output.trim()}`);
-    }
+    assertHdcInstallSuccess(output);
   }
 
   async uninstall(): Promise<void> {

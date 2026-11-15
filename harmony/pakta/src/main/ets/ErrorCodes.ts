@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 无依赖（自包含叶子模块），手动镜像 cpp/patch_core/error_codes.h 的错误码
+ * [INPUT]: 无运行时依赖；错误码声明由 scripts/contract.json 的 nativeErrors 经 generate-contract.js 派生，错误转换逻辑不参与生成
  * [OUTPUT]: 提供稳定错误码常量、UpdateError（code 属性 + [CODE] 消息前缀）与 createUpdateError/toUpdateError/parseErrorCodePrefix
  * [POS]: harmony/pakta 的错误码契约层，供任何 ets 文件安全引用而不成环
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -23,8 +23,7 @@ export const ERROR_RESTART_FAILED = 'RESTART_FAILED';
 export const ERROR_RESET_FAILED = 'RESET_FAILED';
 export const ERROR_INVALID_HASH_INFO = 'INVALID_HASH_INFO';
 export const ERROR_UNSUPPORTED_PLATFORM = 'UNSUPPORTED_PLATFORM';
-export const ERROR_APK_INSTALL_PERMISSION_REQUIRED =
-  'APK_INSTALL_PERMISSION_REQUIRED';
+export const ERROR_APK_INSTALL_PERMISSION_REQUIRED = 'APK_INSTALL_PERMISSION_REQUIRED';
 export const ERROR_APK_INSTALL_FAILED = 'APK_INSTALL_FAILED';
 
 /**

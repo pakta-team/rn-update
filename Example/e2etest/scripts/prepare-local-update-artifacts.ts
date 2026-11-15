@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * [INPUT]: 依赖 Node 子进程/文件系统、跨平台 Bun/npm 可执行文件、SDK scripts 与样例 bundle 入口
+ * [INPUT]: 依赖 Node 子进程/文件系统、CLI、样例入口与显式 RNU_E2E_BUNDLER；Expo 复用相同制品协议
  * [OUTPUT]: 对外提供 full/diff/ppk/v2-track 本地制品生成命令
  * [POS]: e2etest 制品流水线核心脚本，输出供 local-e2e-server 消费
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -63,6 +63,13 @@ type HdiffModuleInfo = {
 
 const projectRoot = process.cwd();
 const platform = process.env.E2E_PLATFORM || 'ios';
+const bundler = process.env.RNU_E2E_BUNDLER || 'react-native';
+if (!['react-native', 'expo'].includes(bundler)) {
+  throw new Error(`Unsupported RNU_E2E_BUNDLER: ${bundler}`);
+}
+if (platform === 'harmony' && bundler === 'expo') {
+  throw new Error('Expo bundler does not support Harmony artifacts');
+}
 const artifactsRoot = path.join(projectRoot, '.e2e-artifacts');
 const artifactsDir = path.join(artifactsRoot, platform);
 const diffTimeoutMs = 5 * 60_000;
@@ -187,8 +194,7 @@ function getDiffCommands(): DiffCommandRunner {
 // minutes, so the old 120s cap killed a healthy `pakta bundle` mid-flight
 // (spawnSync ETIMEDOUT). This is a stuck-process guard, not a perf budget —
 // the step and job timeouts already bound the happy path.
-const PAKTA_TIMEOUT_MS =
-  Number(process.env.RNU_PAKTA_TIMEOUT_MS) || 300_000;
+const PAKTA_TIMEOUT_MS = Number(process.env.RNU_PAKTA_TIMEOUT_MS) || 300_000;
 
 // e2e 必须明确进入 Hermes 差量编译链：v1 是普通 HBC 基线，v2/v3/v4
 // 都以 v1 的 HBC 编译。否则生成的 ppk 虽然能下载，却没有覆盖生产环境
@@ -354,7 +360,11 @@ function bundleTo(entryFile: string, outputFile: string, hermesBase = 'none') {
       '--dev',
       'false',
       // The harmony bundler path in the CLI drives Metro itself.
-      ...(platform === 'harmony' ? [] : ['--rncli']),
+      ...(platform === 'harmony'
+        ? []
+        : bundler === 'expo'
+          ? ['--expo']
+          : ['--rncli']),
       '--output',
       outputFile,
       '--hermesBase',
@@ -371,10 +381,9 @@ function bundleTo(entryFile: string, outputFile: string, hermesBase = 'none') {
     const verified =
       HERMES_BASE_ATTEMPTED.test(output) && HERMES_BASE_VERIFIED.test(output);
     if (!verified) {
-      const message =
-        `bundle ${entryFile}: expected a verified hermes base compile against ${path.basename(
-          hermesBase
-        )}, but the CLI output shows none`;
+      const message = `bundle ${entryFile}: expected a verified hermes base compile against ${path.basename(
+        hermesBase
+      )}, but the CLI output shows none`;
       if (process.env.CI) {
         throw new Error(message);
       }

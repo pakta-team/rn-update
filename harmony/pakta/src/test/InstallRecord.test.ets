@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 @ohos/hypium、InstallRecord 纯函数与 ErrorCodes
- * [OUTPUT]: 验证完成记录的序列化/解析、staging 派生、保留条目名与激活摘要校验
+ * [OUTPUT]: 验证完成记录的序列化/解析、staging 派生、保留条目名，仅零字节来源兼容、非空 {} 拒绝及缺 bundle 摘要的构建/激活失败
  * [POS]: harmony/pakta/src/test 的安装记录纯逻辑测试，不碰磁盘
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -16,7 +16,7 @@ import {
   parseInstallRecord,
   stagingDirectoryFor,
 } from '../main/ets/InstallRecord';
-import { ERROR_SWITCH_VERSION_FAILED, UpdateError } from '../main/ets/ErrorCodes';
+import { ERROR_PATCH_FAILED, ERROR_SWITCH_VERSION_FAILED, UpdateError } from '../main/ets/ErrorCodes';
 
 // 两阶段安装的完成记录(cpp/patch_core/install_record.h 的 ArkTS 镜像):
 // 纯逻辑部分,不碰磁盘。
@@ -24,7 +24,7 @@ export default function installRecordTest() {
   describe('InstallRecord.buildInstallRecord', () => {
     it('serializes schema, version and digests', 0, () => {
       const record = parseInstallRecord(
-        buildInstallRecord('abc', 'BUNDLE', 'ARTIFACT'),
+        buildInstallRecord('abc', 'ab'.repeat(32), 'ARTIFACT'),
       );
       expect(record !== null).assertTrue();
       expect(record!.schema).assertEqual(INSTALL_RECORD_SCHEMA);
@@ -33,11 +33,22 @@ export default function installRecordTest() {
       expect(record!.artifactSha256).assertEqual('ARTIFACT');
     });
 
-    it('omits empty digests', 0, () => {
-      const record = parseInstallRecord(buildInstallRecord('abc', '', ''));
+    it('omits an empty artifact digest but keeps the bundle digest', 0, () => {
+      const record = parseInstallRecord(buildInstallRecord('abc', 'BUNDLE', ''));
       expect(record !== null).assertTrue();
-      expect(record!.bundleSha256 === undefined).assertTrue();
-      expect(record!.artifactSha256 === undefined).assertTrue();
+      expect(record!.bundleSha256).assertEqual('ab'.repeat(32));
+      expect(record!.artifactSha256 || '').assertEqual('');
+    });
+
+    it('throws PATCH_FAILED without a bundle digest', 0, () => {
+      let caught: UpdateError | null = null;
+      try {
+        buildInstallRecord('abc', '', 'ARTIFACT');
+      } catch (e) {
+        caught = e as UpdateError;
+      }
+      expect(caught !== null).assertTrue();
+      expect(caught!.message.startsWith(`[${ERROR_PATCH_FAILED}] `)).assertTrue();
     });
 
     it('derives the staging directory from the version directory', 0, () => {
@@ -66,6 +77,7 @@ export default function installRecordTest() {
       expect(parseInstallRecord('[1,2]')).assertNull();
       expect(parseInstallRecord('"text"')).assertNull();
       expect(parseInstallRecord('null')).assertNull();
+      expect(parseInstallRecord(' ')).assertNull();
     });
   });
 
@@ -74,12 +86,14 @@ export default function installRecordTest() {
       expect(isRecordForVersion(null, 'abc')).assertFalse();
     });
 
-    it('trusts a legacy empty record', 0, () => {
-      expect(isRecordForVersion({}, 'abc')).assertTrue();
+    it('trusts only an empty record parsed from zero-byte content', 0, () => {
+      expect(isRecordForVersion(parseInstallRecord(''), 'abc')).assertTrue();
+      expect(isRecordForVersion(parseInstallRecord('{}'), 'abc')).assertFalse();
+      expect(isRecordForVersion({}, 'abc')).assertFalse();
     });
 
     it('requires the schema and version to match', 0, () => {
-      const record = parseInstallRecord(buildInstallRecord('abc', '', ''));
+      const record = parseInstallRecord(buildInstallRecord('abc', 'ab'.repeat(32), ''));
       expect(isRecordForVersion(record, 'abc')).assertTrue();
       expect(isRecordForVersion(record, 'def')).assertFalse();
       expect(
@@ -101,30 +115,61 @@ export default function installRecordTest() {
       expect(caught!.message.startsWith(`[${ERROR_SWITCH_VERSION_FAILED}] `)).assertTrue();
     });
 
-    it('has nothing to verify for legacy or digest-less records', 0, () => {
-      expect(expectedBundleSha256ForActivation({}, 'abc')).assertEqual('');
+    it('has nothing to verify only for zero-byte legacy content', 0, () => {
       expect(
-        expectedBundleSha256ForActivation(
-          parseInstallRecord(buildInstallRecord('abc', '', '')),
-          'abc',
-        ),
+        expectedBundleSha256ForActivation(parseInstallRecord(''), 'abc'),
       ).assertEqual('');
+    });
+
+    it('throws SWITCH_VERSION_FAILED for nonempty JSON {} or a plain object', 0, () => {
+      const records = [parseInstallRecord('{}'), {}];
+      for (const record of records) {
+        let caught: UpdateError | null = null;
+        try {
+          expectedBundleSha256ForActivation(record, 'abc');
+        } catch (e) {
+          caught = e as UpdateError;
+        }
+        expect(caught !== null).assertTrue();
+        expect(caught!.code).assertEqual(ERROR_SWITCH_VERSION_FAILED);
+        expect(caught!.message.startsWith(`[${ERROR_SWITCH_VERSION_FAILED}] `)).assertTrue();
+      }
+    });
+
+    it('throws SWITCH_VERSION_FAILED for a missing or empty bundle digest', 0, () => {
+      const contents = [
+        '{"schema":1,"versionHash":"abc","artifactSha256":"ARTIFACT"}',
+        '{"schema":1,"versionHash":"abc","bundleSha256":""}',
+      ];
+      for (const content of contents) {
+        const record = parseInstallRecord(content);
+        expect(isRecordForVersion(record, 'abc')).assertTrue();
+        let caught: UpdateError | null = null;
+        try {
+          expectedBundleSha256ForActivation(record, 'abc');
+        } catch (e) {
+          caught = e as UpdateError;
+        }
+        expect(caught !== null).assertTrue();
+        expect(caught!.code).assertEqual(ERROR_SWITCH_VERSION_FAILED);
+        expect(caught!.message.startsWith(`[${ERROR_SWITCH_VERSION_FAILED}] `)).assertTrue();
+      }
     });
 
     it('returns the recorded digest for a matching record', 0, () => {
       expect(
         expectedBundleSha256ForActivation(
-          parseInstallRecord(buildInstallRecord('abc', 'DIGEST', '')),
+          parseInstallRecord(buildInstallRecord('abc', 'ab'.repeat(32), '')),
           'abc',
         ),
-      ).assertEqual('DIGEST');
+      ).assertEqual('ab'.repeat(32));
     });
 
     it('throws on a record for another version', 0, () => {
       let threw = false;
       try {
         expectedBundleSha256ForActivation(
-          parseInstallRecord(buildInstallRecord('def', 'DIGEST', '')),
+          parseInstallRecord(buildInstallRecord('def', 'ab'.repeat(32), '')),
           'abc',
         );
       } catch (e) {

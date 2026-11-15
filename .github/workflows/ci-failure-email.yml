@@ -1,0 +1,125 @@
+# [INPUT]: 依赖已完成的 workflow_run 结论和仓库 issue API
+# [OUTPUT]: 对常规分支更新失败 issue；隔离验证分支不产生通知或评论
+# [POS]: CI 运维通知边界，验证授权不扩展为向第三方发送消息
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+name: CI Failure Issue
+
+on:
+  workflow_run:
+    workflows:
+      - e2e-android
+      - e2e-ios
+      - e2e-harmony
+      - expo-build
+      - lint
+      - Publish Package to npmjs
+      - test
+    types: [completed]
+
+jobs:
+  notify:
+    if: contains(fromJSON('["failure","timed_out","action_required"]'), github.event.workflow_run.conclusion) && !startsWith(github.event.workflow_run.head_branch, 'codex/verify-')
+    permissions:
+      issues: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or update failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          ACTOR: ${{ github.event.workflow_run.actor.login }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          reported_at="$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %z')"
+          issue_title_prefix="[CI failed] $REPOSITORY / $WORKFLOW_NAME at "
+          body_file="$(mktemp)"
+          cat > "$body_file" <<EOF
+          CI run failed.
+
+          Repository: $REPOSITORY
+          Workflow: $WORKFLOW_NAME
+          Conclusion: $CONCLUSION
+          Branch: $HEAD_BRANCH
+          Commit: $HEAD_SHA
+          Actor: $ACTOR
+          Reported at: $reported_at
+          Run: $RUN_URL
+          EOF
+
+          issue_title="$issue_title_prefix$reported_at"
+          issue_numbers="$(
+            gh issue list \
+              --repo "$REPOSITORY" \
+              --state open \
+              --limit 1000 \
+              --json number,title |
+              jq -r --arg prefix "$issue_title_prefix" '.[] | select(.title | startswith($prefix)) | .number'
+          )"
+
+          if [ -n "$issue_numbers" ]; then
+            while IFS= read -r issue_number; do
+              [ -n "$issue_number" ] || continue
+              gh issue edit "$issue_number" \
+                --repo "$REPOSITORY" \
+                --title "$issue_title" \
+                --body-file "$body_file"
+            done <<< "$issue_numbers"
+            exit 0
+          fi
+
+          gh issue create \
+            --repo "$REPOSITORY" \
+            --title "$issue_title" \
+            --body-file "$body_file"
+
+  close:
+    if: github.event.workflow_run.conclusion == 'success' && !startsWith(github.event.workflow_run.head_branch, 'codex/verify-')
+    permissions:
+      issues: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close recovered failure issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          issue_title_prefix="[CI failed] $REPOSITORY / $WORKFLOW_NAME at "
+          fixed_at="$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %z')"
+          issue_numbers="$(
+            gh issue list \
+              --repo "$REPOSITORY" \
+              --state open \
+              --limit 1000 \
+              --json number,title |
+              jq -r --arg prefix "$issue_title_prefix" '.[] | select(.title | startswith($prefix)) | .number'
+          )"
+
+          if [ -z "$issue_numbers" ]; then
+            exit 0
+          fi
+
+          comment_body="$(cat <<EOF
+          CI recovered at $fixed_at.
+
+          Repository: $REPOSITORY
+          Workflow: $WORKFLOW_NAME
+          Branch: $HEAD_BRANCH
+          Commit: $HEAD_SHA
+          Run: $RUN_URL
+          EOF
+          )"
+
+          while IFS= read -r issue_number; do
+            [ -n "$issue_number" ] || continue
+            gh issue close "$issue_number" \
+              --repo "$REPOSITORY" \
+              --comment "$comment_body"
+          done <<< "$issue_numbers"

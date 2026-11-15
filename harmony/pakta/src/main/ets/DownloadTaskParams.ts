@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 UpdateContext 的任务构造与 Harmony 文件/网络目标字段
+ * [INPUT]: 依赖 UpdateContext 的任务构造与 Harmony 文件/网络目标字段；任务编号由 scripts/contract.json 的 taskTypes 派生
  * [OUTPUT]: 对外提供清理、全量、APP 差分、PPK 差分和普通下载的任务参数对象
  * [POS]: UpdateContext 与 DownloadTask 之间的命令信封，集中表达制品身份、目录和冷启动截止时间
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

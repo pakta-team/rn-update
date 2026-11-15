@@ -1,0 +1,6 @@
+# [INPUT]: 依赖已预置 DevEco 与设备的 Harmony 自托管 runner 标签
+# [OUTPUT]: 让 actionlint 识别 Harmony 工作流的自定义 runner，不放宽其他工作流规则
+# [POS]: 公开 SDK 自动化目录的静态检查配置
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+self-hosted-runner:
+  labels: [harmony]

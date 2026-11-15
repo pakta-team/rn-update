@@ -1,14 +1,14 @@
 #!/bin/sh
-# [INPUT]: 依赖 C++17 编译器、cpp/update_flow_core 实现与 tests/flow_vectors.json，可选 SANITIZE=1 开启 sanitizer
-# [OUTPUT]: 在 .tmp/update-flow-core-tests 编译并运行更新流核心回放测试，以退出码证明 C++ 与共享向量一致
-# [POS]: scripts 的跨语言更新流验证入口，与 generate-flow-vectors.ts 形成生成→回放闭环
+# [INPUT]: 依赖 C++17、flow/config/native_round/round_engine 与六组向量，FLOW_BUILD_DIR/SANITIZE/FUZZ 控制验证
+# [OUTPUT]: 编译并执行旧 flow 与配置/轮次回放，消毒不可恢复；可选 fuzz 缺运行库明确跳过
+# [POS]: scripts 的跨语言纯核验证入口，不接平台 IO；与 generate-flow-vectors.ts 形成生成到回放闭环
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 set -eu
 
 # Intentional one-command CDPATH assignment.
 # shellcheck disable=SC1007
 ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
-BUILD_DIR="$ROOT_DIR/.tmp/update-flow-core-tests"
+BUILD_DIR="${FLOW_BUILD_DIR:-$ROOT_DIR/.tmp/update-flow-core-tests}"
 
 mkdir -p "$BUILD_DIR"
 
@@ -16,7 +16,7 @@ mkdir -p "$BUILD_DIR"
 # SANITIZE=1 npm run test:flow-core
 SANITIZE_FLAGS=""
 if [ "${SANITIZE:-0}" = "1" ]; then
-  SANITIZE_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+  SANITIZE_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -g"
   echo "Building update flow core tests with AddressSanitizer + UBSan"
 fi
 
@@ -36,6 +36,22 @@ c++ \
 
 "$BUILD_DIR/update_flow_core_test" \
   "$ROOT_DIR/cpp/update_flow_core/tests/flow_vectors.json"
+
+c++ -std=c++17 $CORE_WARNINGS $SANITIZE_FLAGS \
+  "$ROOT_DIR/cpp/update_flow_core/flow_json.cpp" \
+  "$ROOT_DIR/cpp/update_flow_core/update_flow_core.cpp" \
+  "$ROOT_DIR/cpp/update_flow_core/native_config.cpp" \
+  "$ROOT_DIR/cpp/update_flow_core/native_round.cpp" \
+  "$ROOT_DIR/cpp/update_flow_core/round_engine.cpp" \
+  "$ROOT_DIR/cpp/update_flow_core/tests/native_flow_test.cpp" \
+  -o "$BUILD_DIR/native_flow_test"
+
+"$BUILD_DIR/native_flow_test" \
+  "$ROOT_DIR/cpp/update_flow_core/tests/config-equivalence-vectors.json" \
+  "$ROOT_DIR/cpp/update_flow_core/tests/native-config-vectors.json" \
+  "$ROOT_DIR/cpp/update_flow_core/tests/native-round-vectors.json" \
+  "$ROOT_DIR/cpp/update_flow_core/tests/round-engine-vectors.json" \
+  "$ROOT_DIR/cpp/update_flow_core/tests/pakta-flow-vectors.json"
 
 # Opt-in libFuzzer run of the JSON parser + decision pipeline (raw server
 # bytes): FUZZ=1 npm run test:flow-core. Needs clang with the libFuzzer

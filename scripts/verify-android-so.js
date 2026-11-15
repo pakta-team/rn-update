@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * [INPUT]: 依赖 android/lib 下四个 ABI 的 librnupdate.so ELF 文件、预期机器架构、JNI 符号清单与 16KB 对齐约束
+ * [INPUT]: 依赖 android/lib 下四个 ABI 的 librnupdate.so ELF 文件与 JNI 符号清单；ABI 名称/ELF machine/页对齐声明由 contract.json 派生，JNI 校验规则独立维护
  * [OUTPUT]: 解析 .dynsym/LOAD 段并报告缺失库、架构、符号或页对齐错误，以进程退出码阻断不完整发布
  * [POS]: scripts 的 Android 原生发布完整性验证器，被 build-android-so.sh 与 prepublish.ts 调用，不依赖外部 binutils
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -20,21 +20,35 @@
 const fs = require('fs');
 const path = require('path');
 
-const LIB_DIR = path.resolve(__dirname, '..', 'android', 'lib');
-const ABIS = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'];
+const LIB_DIR = process.argv[2]
+  ? path.resolve(process.argv[2]) : path.resolve(__dirname, '..', 'android', 'lib');
+const ABIS = ["arm64-v8a","armeabi-v7a","x86","x86_64"];
 
 // ELF e_machine per ABI, so a symbol-complete .so placed in the wrong ABI
 // directory (mixed-up artifacts) still fails verification.
 const ABI_MACHINE = {
-  'arm64-v8a': 0xb7, // EM_AARCH64
-  'armeabi-v7a': 0x28, // EM_ARM
-  x86: 0x03, // EM_386
-  x86_64: 0x3e, // EM_X86_64
+  "arm64-v8a": 183,
+  "armeabi-v7a": 40,
+  "x86": 3,
+  "x86_64": 62
 };
 
 // JNI entry points the Java `native` declarations bind to. Keep in sync with
 // the native methods in android/src/main/java/cn/reactnative/modules/update/.
 const REQUIRED_SYMBOLS = [
+  'Java_cn_reactnative_modules_update_NativeInstall_execute',
+  'Java_cn_reactnative_modules_update_NativeInstall_checkActivation',
+  'Java_cn_reactnative_modules_update_NativeInstall_unchanged',
+  'Java_cn_reactnative_modules_update_NativeInstall_release',
+  'Java_cn_reactnative_modules_update_NativeInstall_inspect',
+  'Java_cn_reactnative_modules_update_NativeUpdateFlow_stepRound',
+  'Java_cn_reactnative_modules_update_NativeUpdateFlow_runnableConfig',
+  'Java_cn_reactnative_modules_update_NativeUpdateFlow_normalizeConfiguration',
+  'Java_cn_reactnative_modules_update_NativeUpdateFlow_configsEquivalent',
+  'Java_cn_reactnative_modules_update_NativeUpdateFlow_hostCancellation',
+  'Java_cn_reactnative_modules_update_ResumePlan_planRequest',
+  'Java_cn_reactnative_modules_update_ResumePlan_classifyResponse',
+  'Java_cn_reactnative_modules_update_ResumePlan_sidecar',
   'Java_cn_reactnative_modules_update_DownloadTask_applyPatchFromFileSource',
   'Java_cn_reactnative_modules_update_DownloadTask_cleanupOldEntries',
   'Java_cn_reactnative_modules_update_DownloadTask_buildArchivePatchPlan',
@@ -42,10 +56,6 @@ const REQUIRED_SYMBOLS = [
   'Java_cn_reactnative_modules_update_UpdateContext_syncStateWithBinaryVersion',
   'Java_cn_reactnative_modules_update_UpdateContext_runStateCore',
   'Java_cn_reactnative_modules_update_NativeUpdateCore_getSupportedDiffVersion',
-  'Java_cn_reactnative_modules_update_NativeUpdateFlow_buildCheckRequestBody',
-  'Java_cn_reactnative_modules_update_NativeUpdateFlow_orderEndpointCandidates',
-  'Java_cn_reactnative_modules_update_NativeUpdateFlow_handleCheckResponse',
-  'Java_cn_reactnative_modules_update_NativeUpdateFlow_isValidCheckResponse',
 ];
 
 const SHT_DYNSYM = 11;
@@ -56,7 +66,7 @@ const PT_LOAD = 1;
 // LOAD segment must be aligned to at least 16384 bytes. v10.45.0–v10.48.0
 // shipped 4 KB-aligned libraries because the publish CI resolved an old NDK,
 // and nothing caught it — this check makes that failure loud.
-const PAGE_ALIGN_ABIS = { 'arm64-v8a': 16384, x86_64: 16384 };
+const PAGE_ALIGN_ABIS = {"arm64-v8a":16384,"x86_64":16384};
 
 /** Returns the smallest p_align among the ELF's LOAD segments. */
 function readMinLoadAlignment(buffer) {
@@ -179,6 +189,12 @@ for (const abi of ABIS) {
   }
 
   const buffer = fs.readFileSync(soPath);
+  const { findBufferWording } = require(path.join(__dirname, 'check-binary-strings.js'));
+  const wording = findBufferWording(buffer);
+  for (const hit of wording) {
+    console.error(`error: ${soPath} contains forbidden wording ${JSON.stringify(hit)}`);
+    failed = true;
+  }
   let symbols;
   try {
     symbols = readDynamicSymbols(buffer, ABI_MACHINE[abi]);

@@ -8,6 +8,7 @@ import { describe, expect, mock, test } from 'bun:test';
 import {
   dedupeEndpoints,
   executeEndpointFallback,
+  MAX_ENDPOINT_REQUESTS,
   selectFastestSuccessfulEndpoint,
 } from '../endpoint';
 
@@ -230,5 +231,71 @@ describe('executeEndpointFallback without endpoints', () => {
     expect(err.code).toBe('NO_ENDPOINTS');
     // setup.ts mocks i18n.t to echo the key: the message went through i18n.
     expect(err.message).toBe('error_no_endpoints');
+  });
+});
+
+describe('executeEndpointFallback request budget', () => {
+  test('asks at most MAX_ENDPOINT_REQUESTS endpoints across all rounds', async () => {
+    const tryEndpoint = mock(async (endpoint: string) => {
+      throw new Error(`${endpoint} failed`);
+    });
+    // A long remote list, refreshed with new entries on every round.
+    let round = 0;
+    const getRemoteEndpoints = mock(async () => {
+      round++;
+      return Array.from({ length: 20 }, (_, i) => `r${round}-${i}`);
+    });
+
+    await expect(
+      executeEndpointFallback({
+        configuredEndpoints: ['a', 'b'],
+        getRemoteEndpoints,
+        tryEndpoint,
+        random: () => 0,
+        hedgeDelayMs: 0,
+      })
+    ).rejects.toThrow('failed');
+
+    expect(tryEndpoint).toHaveBeenCalledTimes(MAX_ENDPOINT_REQUESTS);
+    expect(tryEndpoint.mock.calls.map((call) => call[0])).toEqual([
+      'a',
+      'b',
+      'r1-0',
+      'r1-1',
+      'r1-2',
+      'r1-3',
+      'r1-4',
+      'r1-5',
+    ]);
+  });
+
+  test('a zero budget issues no request', async () => {
+    const tryEndpoint = mock(async () => 'ok');
+    await expect(
+      executeEndpointFallback({
+        configuredEndpoints: ['a'],
+        tryEndpoint,
+        maxRequests: 0,
+      })
+    ).rejects.toMatchObject({ code: 'NO_ENDPOINTS' });
+    expect(tryEndpoint).not.toHaveBeenCalled();
+  });
+
+  test('a success within the budget still wins', async () => {
+    const tryEndpoint = mock(async (endpoint: string) => {
+      if (endpoint === 'c') {
+        return 'ok';
+      }
+      throw new Error(`${endpoint} failed`);
+    });
+    await expect(
+      executeEndpointFallback({
+        configuredEndpoints: ['a', 'b', 'c'],
+        tryEndpoint,
+        random: () => 0,
+        hedgeDelayMs: 0,
+        maxRequests: 3,
+      })
+    ).resolves.toMatchObject({ endpoint: 'c', value: 'ok' });
   });
 });

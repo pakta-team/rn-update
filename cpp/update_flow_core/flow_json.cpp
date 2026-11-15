@@ -71,6 +71,26 @@ void Value::Remove(const std::string& key) {
   }
 }
 
+bool Value::DeepEquals(const Value& a, const Value& b) {
+  if (a.IsArray() && b.IsArray()) {
+    if (a.Size() != b.Size()) return false;
+    for (size_t i = 0; i < a.Size(); ++i) {
+      if (!DeepEquals(a.At(i), b.At(i))) return false;
+    }
+    return true;
+  }
+  if (a.IsObject() && b.IsObject()) {
+    for (const auto& member : a.members()) {
+      if (!DeepEquals(member.second, b.Get(member.first))) return false;
+    }
+    for (const auto& member : b.members()) {
+      if (!DeepEquals(a.Get(member.first), member.second)) return false;
+    }
+    return true;
+  }
+  return StrictEquals(a, b);
+}
+
 bool Value::StrictEquals(const Value& a, const Value& b) {
   if (a.kind_ != b.kind_) {
     return false;
@@ -333,7 +353,8 @@ double DecimalToDouble(const std::string& token) {
 
 class Parser {
  public:
-  Parser(const std::string& text) : text_(text) {}
+  Parser(const std::string& text, size_t max_nodes)
+      : text_(text), max_nodes_(max_nodes) {}
 
   Value Run(bool* ok) {
     Value v = ParseValue();
@@ -382,7 +403,7 @@ class Parser {
       ok_ = false;
       return Value::Undefined();
     }
-    if (++nodes_ > kMaxNodes) {
+    if (++nodes_ > max_nodes_) {
       ok_ = false;
       return Value::Undefined();
     }
@@ -641,6 +662,7 @@ class Parser {
   }
 
   const std::string& text_;
+  size_t max_nodes_;
   size_t pos_ = 0;
   int depth_ = 0;
   size_t nodes_ = 0;
@@ -650,11 +672,15 @@ class Parser {
 }  // namespace
 
 Value Parse(const std::string& text, bool* ok) {
-  if (text.size() > kMaxInputBytes) {
+  return Parse(text, ParseLimits{}, ok);
+}
+
+Value Parse(const std::string& text, const ParseLimits& limits, bool* ok) {
+  if (text.size() > limits.max_input_bytes) {
     *ok = false;
     return Value::Undefined();
   }
-  Parser parser(text);
+  Parser parser(text, limits.max_nodes);
   return parser.Run(ok);
 }
 

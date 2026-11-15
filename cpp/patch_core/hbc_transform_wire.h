@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 hbc_transform.h 的布局类型与随补丁下发的受限 hbcTransform JSON 协议
+ * [INPUT]: 依赖 hbc_transform.h 的布局类型与受限 hbcTransform JSON 协议；wire 版本常量由 scripts/contract.json 的 wireVersions 派生，解析逻辑不参与生成
  * [OUTPUT]: 对外提供 diffV 常量、HbcTransformMeta、严格解析器与布局构建函数
  * [POS]: patch_core 的不可信元数据防腐层，把 wire JSON 收敛为变换解释器可消费的描述
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

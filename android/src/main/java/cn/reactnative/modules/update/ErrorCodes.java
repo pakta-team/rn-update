@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 cpp/patch_core/error_codes.h 与 src/error.ts 的跨平台稳定码契约
+ * [INPUT]: 常量声明由 scripts/contract.json 的 nativeErrors 经 generate-contract.js 派生，无运行时脚本依赖
  * [OUTPUT]: 对内提供 Android Promise 拒绝使用的机器可读错误码常量
- * [POS]: Android 错误协议单一事实映射，由 UpdateModuleImpl 和线程执行器消费，消息文本不属于稳定契约
+ * [POS]: Android 错误协议消费层，由 UpdateModuleImpl 和线程执行器消费，消息文本不属于稳定契约
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 package cn.reactnative.modules.update;
@@ -29,5 +29,15 @@ final class ErrorCodes {
     static final String APK_INSTALL_FAILED = "APK_INSTALL_FAILED";
 
     private ErrorCodes() {
+    }
+
+    static String forDownloadFailure(Throwable error) {
+        if (error instanceof PatchFailedException) {
+            return PATCH_FAILED;
+        }
+        if (error instanceof FileOperationException) {
+            return FILE_OPERATION_FAILED;
+        }
+        return DOWNLOAD_FAILED;
     }
 }

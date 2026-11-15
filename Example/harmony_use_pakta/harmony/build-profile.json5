@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 HarmonyOS 6.1 SDK、entry 模块与本机可选签名覆盖
- * [OUTPUT]: 提供无私钥的产品、SDK、构建变体和模块配置
+ * [INPUT]: 依赖当前 DevEco 自带编译 SDK、entry 模块与本机可选签名覆盖
+ * [OUTPUT]: 提供无私钥的产品、API 23 target/API 12 兼容、构建变体与模块配置
  * [POS]: harmony_use_pakta 公共交付配置；签名材料只允许由 hvigorfile.ts 从本机文件注入
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -10,7 +10,6 @@
       {
         name: 'default',
         signingConfig: 'default',
-        compileSdkVersion: '6.1.0(23)',
         targetSdkVersion: '6.1.0(23)',
         compatibleSdkVersion: '5.0.0(12)',
         runtimeOS: 'HarmonyOS',

@@ -83,6 +83,7 @@ class Value {
   void Remove(const std::string& key);
 
   static bool StrictEquals(const Value& a, const Value& b);
+  static bool DeepEquals(const Value& a, const Value& b);
 
  private:
   explicit Value(Kind kind) : kind_(kind) {}
@@ -110,6 +111,13 @@ std::string Stringify(const Value& v);
 // responses are a few KB and a few hundred nodes.
 constexpr size_t kMaxInputBytes = 1024 * 1024;
 constexpr size_t kMaxNodes = 65536;
+
+struct ParseLimits {
+  size_t max_input_bytes = kMaxInputBytes;
+  size_t max_nodes = kMaxNodes;
+};
+
+Value Parse(const std::string& text, const ParseLimits& limits, bool* ok);
 
 // Strict JSON parser (the vectors file and checkUpdate responses). Returns
 // Undefined and sets *ok to false on malformed input; nesting beyond 64

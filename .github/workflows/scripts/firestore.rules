@@ -1,0 +1,21 @@
+// [INPUT]: 依赖 Firebase Emulator 的 Firestore 测试请求与集合路径。
+// [OUTPUT]: 默认拒绝读写，仅开放测试夹具使用的指定集合。
+// [POS]: CI Firebase 测试规则，不用于生产 Firestore 权限配置。
+// [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+  match /{document=**} {
+      allow read, write: if false;
+    }
+  match /firestore-bundle-tests/{document=**} {
+      allow read, write: if true;
+    }
+  match /firestore/{document=**} {
+      allow read, write: if true;
+    }
+  match /{path=**}/collectionGroup/{documentId} {
+      allow read, write: if true;
+    }
+  }
+}

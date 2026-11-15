@@ -26,6 +26,10 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 public class SafeZipFileTest {
+    @org.junit.BeforeClass public static void requireNative() {
+        SharedInstallNativeTest.requireNative();
+    }
+
     @Rule
     public TemporaryFolder temp = new TemporaryFolder();
 

@@ -314,6 +314,53 @@ describe('Pakta server config', () => {
     expect(body.diffV).toBe(2);
   });
 
+  test('resolves the gray rollout for direct checkUpdate callers', async () => {
+    setupClientMocks();
+    const afterCheckUpdate = mock(() => {});
+    const { Pakta } = await importFreshClient('check-gray-rollout');
+    const client = new Pakta({ appKey: 'demo-app', afterCheckUpdate });
+    const rootFor = (rollout: number) => ({
+      update: true as const,
+      name: 'root',
+      hash: 'root-hash',
+      full: 'root.ppk',
+      paths: ['https://cdn.example.com'],
+      expVersion: {
+        name: 'gray',
+        hash: 'gray-hash',
+        full: 'gray.ppk',
+        config: {
+          rollout: { [client.getEffectivePackageVersion()]: rollout },
+        },
+      },
+    });
+
+    // 100% 灰度：候选替换根发布并保留根发布的 CDN 路径，expVersion 不再外泄。
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse(rootFor(100))
+    );
+    const inRollout = await client.checkUpdate({ round: 1 });
+    expect(inRollout).toMatchObject({
+      update: true,
+      name: 'gray',
+      hash: 'gray-hash',
+      paths: ['https://cdn.example.com'],
+    });
+    expect(inRollout).not.toHaveProperty('expVersion');
+    expect(afterCheckUpdate).toHaveBeenLastCalledWith({
+      status: 'completed',
+      result: inRollout,
+    });
+
+    // 0% 灰度：根发布生效。
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse(rootFor(0))
+    );
+    const outOfRollout = await client.checkUpdate({ round: 2 });
+    expect(outOfRollout).toMatchObject({ update: true, hash: 'root-hash' });
+    expect(outOfRollout).not.toHaveProperty('expVersion');
+  });
+
   test('omits diffV when the native module reports no diff track support', async () => {
     setupClientMocks({ supportedDiffVersion: 0 });
     const fetchMock = mock(async () => createJsonResponse({ update: false }));

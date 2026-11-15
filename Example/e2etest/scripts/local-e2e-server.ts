@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /*
  * [INPUT]: 依赖 Bun HTTP、文件系统、localUpdateConfig 与本地制品目录
- * [OUTPUT]: 对外提供版本检查、制品下载、控制和状态 HTTP 接口
+ * [OUTPUT]: 对外提供版本检查、制品下载、forceBoot 控制及带时间戳的只读请求观测接口
  * [POS]: e2etest 更新链的本地传输边界，模拟服务端而不接入生产服务
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -34,6 +34,17 @@ const appKeyToPlatform = Object.fromEntries(
 // work without any JS check. Off by default so the other suites keep full
 // control over when a version becomes active.
 let forceBootEnabled = false;
+type Observation =
+  | {
+      kind: 'check';
+      at: number;
+      platform: string;
+      hash: string;
+      responseHash: string;
+      forceBoot: boolean;
+    }
+  | { kind: 'artifact'; at: number; method: string; path: string };
+const observations: Observation[] = [];
 
 const contentTypes: Record<string, string> = {
   '.json': 'application/json; charset=utf-8',
@@ -183,6 +194,10 @@ const server = Bun.serve({
       });
     }
 
+    if (url.pathname === '/state' && request.method === 'GET') {
+      return json({ forceBoot: forceBootEnabled, observations });
+    }
+
     if (url.pathname === '/control/force-boot') {
       if (request.method !== 'POST') {
         return new Response('method not allowed', { status: 405 });
@@ -218,6 +233,14 @@ const server = Bun.serve({
         diffV,
         url.origin
       );
+      observations.push({
+        kind: 'check',
+        at: Date.now(),
+        platform,
+        hash: currentHash,
+        responseHash: 'hash' in response ? String(response.hash) : '',
+        forceBoot: forceBootEnabled && 'update' in response,
+      });
       if (forceBootEnabled && 'update' in response) {
         return json({ ...response, config: { forceBoot: true } });
       }
@@ -235,6 +258,12 @@ const server = Bun.serve({
       }
 
       const file = Bun.file(filePath);
+      observations.push({
+        kind: 'artifact',
+        at: Date.now(),
+        method: request.method,
+        path: url.pathname,
+      });
       const ext = path.extname(filePath);
       const contentType = contentTypes[ext] || 'application/octet-stream';
 

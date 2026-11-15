@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 Harmony http/file/zlib/resource APIs、EventHub、DownloadTaskParams、SaveFile 与 NativePatchCore
  * [OUTPUT]: 对外提供 manifest 解析、Range sidecar 续传和 DownloadTask.execute，覆盖 full/diff/pdiff/清理与进度事件
- * [POS]: Harmony 更新 IO 执行核心，由 UpdateContext 串行调度；字节补丁和状态决策分别委托共享 NAPI 与上层
+ * [POS]: Harmony 更新 IO 执行核心，由 UpdateContext 串行调度；续传规则委托共享 NAPI，本层拥有文件副作用、固定截止时间、排队写入收束和一次清零重试
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import http from '@ohos.net.http';
@@ -29,9 +29,7 @@ import {
 } from './ArchiveLimits';
 import {
   HARMONY_BUNDLE_FILE_NAME,
-  buildInstallRecord,
   stagingDirectoryFor,
-  writeInstallRecord,
 } from './InstallRecord';
 import {
   ERROR_DOWNLOAD_FAILED,
@@ -44,6 +42,8 @@ import {
 } from './ErrorCodes';
 
 const TAG = 'DownloadTask';
+// 连接超时,与 Android DownloadTask 的 connectTimeout(15s)一致。
+const CONNECT_TIMEOUT_MS = 15000;
 
 export interface PatchManifestArrays {
   copyFroms: string[];
@@ -59,59 +59,13 @@ export interface PatchManifestArrays {
 }
 
 export function parseManifestToArrays(
-  manifest: Record<string, any>,
+  manifest: Record<string, any> | string,
   normalizeResourceCopies: boolean,
 ): PatchManifestArrays {
-  const copyFroms: string[] = [];
-  const copyTos: string[] = [];
-  const copyCrcs: (number | null)[] = [];
-  const deletesValue = manifest.deletes;
-  const deletes = Array.isArray(deletesValue)
-    ? deletesValue.map(item => String(item))
-    : deletesValue && typeof deletesValue === 'object'
-      ? Object.keys(deletesValue)
-      : [];
-
-  const copies = (manifest.copies || {}) as Record<string, string>;
-  const copiesCrcValue = manifest.copiesCrc;
-  const copiesCrc =
-    copiesCrcValue && typeof copiesCrcValue === 'object'
-      ? (copiesCrcValue as Record<string, number>)
-      : ({} as Record<string, number>);
-  for (const to of Object.keys(copies)) {
-    const rawFrom = copies[to];
-    let from = String(rawFrom || '');
-    if (normalizeResourceCopies) {
-      from = from.replace('resources/rawfile/', '');
-      if (!from) {
-        from = to;
-      }
-    }
-    copyFroms.push(from);
-    copyTos.push(to);
-    const crc = copiesCrc[to];
-    copyCrcs.push(typeof crc === 'number' && Number.isFinite(crc) ? crc : null);
-  }
-
-  const hbcTransform = manifest.hbcTransform as
-    | Record<string, object>
-    | undefined;
-  const hbcTransformEntry =
-    hbcTransform && typeof hbcTransform === 'object'
-      ? hbcTransform[HARMONY_BUNDLE_PATCH_ENTRY]
-      : undefined;
-  const hbcTransformMeta =
-    hbcTransformEntry && typeof hbcTransformEntry === 'object'
-      ? JSON.stringify(hbcTransformEntry)
-      : '';
-
-  return {
-    copyFroms,
-    copyTos,
-    copyCrcs,
-    deletes,
-    hbcTransformMeta,
-  };
+  return JSON.parse(NativePatchCore.installParseManifest(
+    typeof manifest === 'string' ? manifest : JSON.stringify(manifest),
+    normalizeResourceCopies,
+  )) as PatchManifestArrays;
 }
 
 interface PatchInputs {
@@ -154,31 +108,7 @@ export function parseContentRangeTotal(
   header: string,
   expectedStart: number,
 ): number {
-  if (!header.startsWith('bytes ')) {
-    return -1;
-  }
-  const range = header.substring('bytes '.length).trim();
-  const slash = range.indexOf('/');
-  const dash = range.indexOf('-');
-  if (slash < 0 || dash < 0 || dash > slash) {
-    return -1;
-  }
-  const start = parseInt(range.substring(0, dash).trim(), 10);
-  const end = parseInt(range.substring(dash + 1, slash).trim(), 10);
-  if (
-    Number.isNaN(start) ||
-    Number.isNaN(end) ||
-    start !== expectedStart ||
-    end < start
-  ) {
-    return -1;
-  }
-  const totalPart = range.substring(slash + 1).trim();
-  if (totalPart === '*') {
-    return 0;
-  }
-  const total = parseInt(totalPart, 10);
-  return Number.isNaN(total) || total <= end ? -1 : total;
+  return NativePatchCore.resumeParseContentRange(header, expectedStart);
 }
 
 export class DownloadTask {
@@ -190,6 +120,7 @@ export class DownloadTask {
   private downloadPhaseCompleted = false;
   // 下载归档的 SHA-256,解压前计算,写进完成记录。
   private artifactSha256 = '';
+  private downloadDeadlineUptimeMs = 0;
 
   // 两阶段安装(cpp/patch_core/install_record.h):解压/打补丁全部在
   // <hash>.staging 里进行,写完完成记录后一次 rename 成 <hash>;失败或崩溃
@@ -200,27 +131,25 @@ export class DownloadTask {
 
   private async promoteStaging(params: DownloadTaskParams): Promise<void> {
     const work = this.stagingDirectory(params);
-    const bundlePath = `${work}/${HARMONY_BUNDLE_FILE_NAME}`;
-    if (!fileIo.accessSync(bundlePath)) {
-      throw createUpdateError(
-        ERROR_PATCH_FAILED,
-        `bundle missing after install: ${bundlePath}`,
-      );
-    }
-    // 整 bundle 几十 MB:摘要在 native 工作线程算,不冻结 UI 线程。
-    const bundleSha256 = await NativePatchCore.sha256HexFileAsync(bundlePath);
-    await writeInstallRecord(
-      work,
-      buildInstallRecord(params.hash, bundleSha256, this.artifactSha256),
-    );
+    this.assertInstallCurrent();
+    await NativePatchCore.installSeal(work, params.hash, this.artifactSha256);
+    this.assertInstallCurrent();
     if (fileIo.accessSync(params.unzipDirectory)) {
+      if (NativePatchCore.installIsComplete(params.unzipDirectory, params.hash)) {
+        await this.removeDirectory(work);
+        return;
+      }
       await this.removeDirectory(params.unzipDirectory);
+      this.assertInstallCurrent();
     }
-    await fileIo.rename(work, params.unzipDirectory);
+    NativePatchCore.installPromote(work, params.unzipDirectory);
   }
 
-  constructor(context: common.Context) {
+  private assertInstallCurrent: () => void;
+
+  constructor(context: common.Context, assertInstallCurrent: () => void = () => {}) {
     this.context = context;
+    this.assertInstallCurrent = assertInstallCurrent;
     this.eventHub = EventHub.getInstance();
   }
 
@@ -233,7 +162,7 @@ export class DownloadTask {
     url: string,
   ): Promise<ResumeMeta | null> {
     const sidecar = this.resumeSidecarPath(targetFile);
-    if (!fileIo.accessSync(sidecar)) {
+    if (!fileIo.accessSync(sidecar) || (await fileIo.stat(sidecar)).size > 64 * 1024) {
       return null;
     }
     try {
@@ -254,7 +183,9 @@ export class DownloadTask {
     meta: ResumeMeta,
   ): Promise<void> {
     try {
-      const encoded = new util.TextEncoder().encodeInto(JSON.stringify(meta));
+      const encoded = new util.TextEncoder().encodeInto(NativePatchCore.resumeSidecar(
+        meta.url, meta.etag || '', meta.lastModified || '', '', meta.total || 0,
+      ));
       await this.writeFileContent(this.resumeSidecarPath(targetFile), encoded);
     } catch (e) {
       // 非致命:没有 sidecar,下次从零开始。
@@ -383,7 +314,7 @@ export class DownloadTask {
     } catch (e) {
       throw toUpdateError(e, ERROR_PATCH_FAILED);
     }
-    await measureExtractedDirectory(unzipDirectory);
+    await measureExtractedDirectory(unzipDirectory, archiveStat.size);
   }
 
   private async recreateDirectory(path: string): Promise<void> {
@@ -480,7 +411,7 @@ export class DownloadTask {
       );
     }
     return parseManifestToArrays(
-      this.parseJsonEntry(await this.readFileContent(manifestPath)),
+      new util.TextDecoder().decodeToString(new Uint8Array(await this.readFileContent(manifestPath))),
       normalizeResourceCopies,
     );
   }
@@ -568,6 +499,8 @@ export class DownloadTask {
 
   private async downloadFile(params: DownloadTaskParams): Promise<void> {
     this.hash = params.hash;
+    this.downloadDeadlineUptimeMs = params.deadlineUptimeMs > 0
+      ? params.deadlineUptimeMs : monotonicNowMs() + DOWNLOAD_CALL_TIMEOUT_MS;
     // 跨启动断点续传(§11.4):砖机每次启动只有几百毫秒,每个已到手的字节
     // 都必须在进程死亡后仍然算数、单调累积。
     const outcome = await this.transferArchive(params, true);
@@ -609,9 +542,7 @@ export class DownloadTask {
     const headersPromise = new Promise<void>(resolve => {
       headersResolve = resolve;
     });
-    const deadlineUptimeMs = params.deadlineUptimeMs > 0
-      ? params.deadlineUptimeMs
-      : monotonicNowMs() + DOWNLOAD_CALL_TIMEOUT_MS;
+    const deadlineUptimeMs = this.downloadDeadlineUptimeMs;
     if (deadlineUptimeMs <= monotonicNowMs()) {
       throw createUpdateError(
         ERROR_DOWNLOAD_FAILED,
@@ -623,20 +554,17 @@ export class DownloadTask {
     let resumeMeta: ResumeMeta | null = allowResume
       ? await this.readResumeMeta(params.targetFile, params.url)
       : null;
-    let resumeOffset = 0;
-    if (resumeMeta && fileIo.accessSync(params.targetFile)) {
-      const stat = await fileIo.stat(params.targetFile);
-      const knownTotal = resumeMeta.total ?? 0;
-      if (stat.size > 0 && knownTotal > 0 && stat.size === knownTotal) {
-        // 上次尝试已收齐(进程死在下载结束与解压之间):无需再传。
-        httpRequest.destroy();
-        this.onProgressUpdate(knownTotal, knownTotal);
-        return 'done';
-      }
-      if (stat.size > 0 && (knownTotal <= 0 || stat.size < knownTotal)) {
-        resumeOffset = stat.size;
-      }
+    const partialSize = fileIo.accessSync(params.targetFile)
+      ? (await fileIo.stat(params.targetFile)).size : 0;
+    const requestPlan = JSON.parse(NativePatchCore.resumePlanRequest(
+      resumeMeta ? JSON.stringify(resumeMeta) : '', params.url, partialSize,
+    )) as { action: string; offset?: number; total?: number; headers?: Record<string, string> };
+    if (requestPlan.action === 'complete') {
+      httpRequest.destroy();
+      this.onProgressUpdate(requestPlan.total || 0, requestPlan.total || 0);
+      return 'done';
     }
+    const resumeOffset = requestPlan.offset || 0;
     if (resumeOffset === 0) {
       if (fileIo.accessSync(params.targetFile)) {
         await fileIo.unlink(params.targetFile);
@@ -729,6 +657,7 @@ export class DownloadTask {
     const INACTIVITY_TIMEOUT_MS = 60000;
     let watchdogTimer: number | null = null;
     let deadlineTimer: number | null = null;
+    let cancellationTimer = 0;
     let inactivityReject: ((error: Error) => void) | null = null;
     const clearWatchdog = () => {
       if (watchdogTimer !== null) {
@@ -844,21 +773,18 @@ export class DownloadTask {
       const requestHeader: Record<string, string> = {
         'Content-Type': 'application/octet-stream',
       };
-      if (resumeOffset > 0) {
-        // 只有续传请求钉死编码:Range 偏移必须与盘上字节一一对应。
-        // 全新下载保留平台默认的压缩处理,与引入续传前的行为一致。
-        requestHeader['Accept-Encoding'] = 'identity';
-        requestHeader.Range = `bytes=${resumeOffset}-`;
-        const validator = resumeMeta?.etag || resumeMeta?.lastModified;
-        if (validator) {
-          // 带验证器时文件已变更的服务端会退回完整 200,而不是把不匹配
-          // 的字节接上来。
-          requestHeader['If-Range'] = validator;
-        }
+      for (const name of Object.keys(requestPlan.headers || {})) {
+        requestHeader[name] = requestPlan.headers![name];
       }
 
       const remainingMs = Math.max(1, deadlineUptimeMs - monotonicNowMs());
       const deadlinePromise = new Promise<never>((_, reject) => {
+        cancellationTimer = setInterval(() => {
+          try { this.assertInstallCurrent(); } catch (error) {
+            reject(error);
+            httpRequest.destroy();
+          }
+        }, 25);
         deadlineTimer = setTimeout(() => {
           reject(
             createUpdateError(
@@ -876,27 +802,28 @@ export class DownloadTask {
         httpRequest.requestInStream(params.url, {
           method: http.RequestMethod.GET,
           readTimeout: remainingMs,
-          connectTimeout: remainingMs,
+          connectTimeout: Math.min(CONNECT_TIMEOUT_MS, remainingMs),
           header: requestHeader,
         }),
         deadlinePromise,
       ]);
 
+      const responsePlan = () => JSON.parse(NativePatchCore.resumeClassifyResponse(
+        responseCode, resumeOffset, contentRangeHeader, contentEncodingHeader,
+        contentLength, resumeMeta ? JSON.stringify(resumeMeta) : '', params.url,
+        partialSize,
+      )) as { action: string; total: number; base: number; append: boolean; encoded: boolean };
       if (responseCode === 416) {
         discardBody = true;
         pendingChunks = null;
-        const knownTotal = resumeMeta?.total ?? 0;
-        if (knownTotal > 0 && fileIo.accessSync(params.targetFile)) {
-          const stat = await fileIo.stat(params.targetFile);
-          if (stat.size === knownTotal) {
-            // partial 实际上就是完整文件。
-            this.onProgressUpdate(knownTotal, knownTotal);
-            return 'done';
-          }
+        const decision = responsePlan();
+        if (decision.action === 'complete') {
+          this.onProgressUpdate(decision.total, decision.total);
+          return 'done';
         }
         return 'staleRange';
       }
-      if (responseCode > 299) {
+      if (responseCode < 200 || responseCode > 299) {
         // 响应体从未落盘,partial + sidecar 原样保留——那就是续传状态。
         discardBody = true;
         pendingChunks = null;
@@ -907,24 +834,23 @@ export class DownloadTask {
       }
 
       let encodedBody = false;
-      if (resumeOffset > 0 && responseCode === 206) {
+      {
         // Content-Range 只能从 headersReceive 拿到,而它与 promise 的先后
         // 顺序不保证——等头到达(dataEnd 前必到,兜底 5s)再判定。
         let headersTimer = 0;
         await Promise.race([
           headersPromise,
           new Promise<void>(resolve => {
-            headersTimer = setTimeout(resolve, 5000);
+            headersTimer = setTimeout(resolve,
+              Math.min(5000, Math.max(1, deadlineUptimeMs - monotonicNowMs())));
           }),
         ]);
         clearTimeout(headersTimer);
-        encodedBody =
-          !!contentEncodingHeader &&
-          contentEncodingHeader.toLowerCase() !== 'identity';
-        const parsedTotal = encodedBody
-          ? -1
-          : parseContentRangeTotal(contentRangeHeader, resumeOffset);
-        if (parsedTotal < 0) {
+      }
+      if (resumeOffset > 0 && responseCode === 206) {
+        const decision = responsePlan();
+        encodedBody = decision.encoded;
+        if (decision.action === 'restart') {
           // 编码过的 range 字节、或 Content-Range 缺失/畸形/起点不符:
           // 追加不可信。按“partial 已过期”处理(删掉、干净地重来一次),
           // 而不是抛错——抛错会保留 partial,之后每次都撞同一堵墙。
@@ -932,8 +858,8 @@ export class DownloadTask {
           pendingChunks = null;
           return 'staleRange';
         }
-        baseOffset = resumeOffset;
-        totalAll = parsedTotal;
+        baseOffset = decision.base;
+        totalAll = decision.total;
         writer = await fileIo.open(
           params.targetFile,
           fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.APPEND,
@@ -944,7 +870,9 @@ export class DownloadTask {
           await fileIo.unlink(params.targetFile);
         }
         baseOffset = 0;
-        totalAll = contentLength > 0 ? contentLength : 0;
+        const decision = responsePlan();
+        totalAll = decision.total;
+        encodedBody = decision.encoded;
         writer = await fileIo.open(
           params.targetFile,
           fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY,
@@ -974,7 +902,11 @@ export class DownloadTask {
       if (totalAll > 0) {
         meta.total = totalAll;
       }
-      await this.writeResumeMeta(params.targetFile, meta);
+      if (encodedBody) {
+        await this.deleteResumeSidecar(params.targetFile);
+      } else {
+        await this.writeResumeMeta(params.targetFile, meta);
+      }
 
       // 鉴权通过:回放缓冲,之后的数据直写。
       const buffered = pendingChunks ?? [];
@@ -1034,7 +966,10 @@ export class DownloadTask {
       logger.error(TAG, `Download failed: ${getErrorMessage(error)}`);
       throw toUpdateError(error, ERROR_DOWNLOAD_FAILED);
     } finally {
+      discardBody = true;
+      pendingChunks = null;
       clearWatchdog();
+      clearInterval(cancellationTimer);
       if (deadlineTimer !== null) {
         clearTimeout(deadlineTimer);
       }
@@ -1043,6 +978,7 @@ export class DownloadTask {
       if (release) {
         release();
       }
+      await writeQueue;
       try {
         await closeWriter();
       } catch (closeError) {

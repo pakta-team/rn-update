@@ -2,7 +2,7 @@
 
 Follow-up to #646. These tests exercise the tvOS Release branch of the real
 `RCTPakta.mm` startup/commit/reset code in a macOS Foundation-only executable.
-There are no production code changes, React Native mocks to install, CocoaPods,
+The test run does not change production code or require React Native mocks, CocoaPods,
 simulator builds, network requests, or sleeps.
 
 ## Run
@@ -30,7 +30,11 @@ copies the exact definitions (with `#line` locations) of `bundleURL`,
 `resolveLaunchBundleURL`, `restorePurgedLaunch`, `commitRoundWithGeneration`,
 `resetToPackagedBundle`, their state/defaults helpers, and the relevant globals
 into build-only `.inc` files. These are compiled unchanged with the actual
-`cpp/patch_core/state_core.cpp`.
+`cpp/patch_core/state_core.cpp`, installation/digest helpers and the shared JSON
+parser. The two `Status::Ok/Error` factory definitions are extracted verbatim
+from `patch_core.cpp` into a separate build-only `status.cpp`, supplying the
+installation/commit link dependency without copying policy or linking unrelated
+patch decoders.
 
 Extraction ignores braces in comments and literals, skips forward declarations,
 and rejects missing or duplicate definitions. No generated implementation is

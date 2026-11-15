@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 e2etest 的 RN CLI/Metro 强制解析配置、安装包元数据与仓库根 package.json
- * [OUTPUT]: 对外提供原生根、JS 入口、React 单例和版本元数据一致性断言，失败即阻断假验证
+ * [OUTPUT]: 对外提供原生根、JS 入口、React 单例、版本元数据与 Metro 扫描边界断言，失败即阻断假验证或无关构建树扫描
  * [POS]: e2etest 构建/测试前置守门器，防止 node_modules 发布包掩盖当前工作树
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -37,10 +37,7 @@ function assertLocalSdk() {
   }
 
   const mappedSdkEntry = path.resolve(
-    metroResolver.mapModuleName(
-      'rn-update',
-      path.join(projectRoot, 'index.js')
-    )
+    metroResolver.mapModuleName('rn-update', path.join(projectRoot, 'index.js'))
   );
   const expectedSdkEntry = path.join(sdkRoot, 'src', 'index.ts');
   if (mappedSdkEntry !== expectedSdkEntry) {
@@ -94,6 +91,27 @@ function assertLocalSdk() {
 
   if (sdkPackage.name !== 'rn-update' || !sdkPackage.version) {
     throw new Error(`Invalid local SDK package at ${sdkRoot}`);
+  }
+
+  const blockList = metroConfig.resolver.blockList;
+  for (const relative of [
+    'src/index.ts',
+    'package.json',
+    'Example/e2etest/index.js',
+  ]) {
+    if (blockList.test(path.join(sdkRoot, relative))) {
+      throw new Error(`Metro excludes a runtime input: ${relative}`);
+    }
+  }
+  for (const relative of [
+    'node_modules/react/index.js',
+    'android/build',
+    'harmony/pakta/build',
+    'Example/expoUsePakta/node_modules',
+  ]) {
+    if (!blockList.test(path.join(sdkRoot, relative))) {
+      throw new Error(`Metro scans an unrelated input tree: ${relative}`);
+    }
   }
 
   process.stdout.write(

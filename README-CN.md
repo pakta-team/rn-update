@@ -128,6 +128,15 @@ export default function Root() {
 ## 进阶配置
 
 <details>
+<summary><strong>限制原生宿主准备等待</strong></summary>
+
+完成真实启动 bundle 选择后，Android 宿主可调用 `PaktaNativeUpdate.checkAndUpdate(context, 1500, callback)`，Harmony 可调用 `provider.checkAndUpdate(1500)`，把本调用等待限制为 1500 ms。两端既有无期限参数签名统一默认 30 分钟。不要为了调用此 API 再解析一次启动 bundle，否则会重复消费首载与回滚标记。
+
+`failed / timeout` 仅表示本调用结束等待。共享轮次仍可在配置/reset 代际门卫允许时完成，为下次启动准备更新；它不会重载当前 React Native 实例，也不影响其他调用方的期限。
+
+</details>
+
+<details>
 <summary><strong>健康确认、崩溃回滚与错误追踪</strong></summary>
 
 - Provider 默认在 1000 ms 后自动确认更新成功。关键初始化较晚时，配置 `autoMarkSuccessDelayMs` 和 `healthCheck`；返回 `false` 会保留崩溃保护。

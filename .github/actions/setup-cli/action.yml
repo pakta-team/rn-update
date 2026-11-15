@@ -1,0 +1,55 @@
+# [INPUT]: 依赖公开 CLI 仓库、显式 ref、Node/Bun 与其冻结锁文件
+# [OUTPUT]: 在 .ci/rn-update-cli 独立检出并构建 CLI，导出根路径和实际提交身份
+# [POS]: SDK 设备工作流的 CLI 消费边界，不读取本机兄弟仓库，也不修改 SDK 版本
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+name: Set up the public Pakta CLI
+description: Check out and build a separate public CLI ref for SDK integration tests.
+inputs:
+  ref:
+    description: Branch, tag or commit in pakta-team/rn-update-cli.
+    default: main
+outputs:
+  root:
+    description: Absolute root of the independently checked-out CLI.
+    value: ${{ steps.identity.outputs.root }}
+  commit:
+    description: Actual CLI Git commit consumed by this job.
+    value: ${{ steps.identity.outputs.commit }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v7
+      with:
+        repository: pakta-team/rn-update-cli
+        ref: ${{ inputs.ref }}
+        path: .ci/rn-update-cli
+        persist-credentials: false
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '24.x'
+    - uses: oven-sh/setup-bun@v2
+    - name: Build the frozen public CLI checkout
+      shell: bash
+      working-directory: ${{ github.workspace }}/.ci/rn-update-cli
+      run: bun install --frozen-lockfile && bun run build
+    - name: Export and record the actual CLI identity
+      id: identity
+      shell: bash
+      working-directory: ${{ github.workspace }}/.ci/rn-update-cli
+      run: |
+        node <<'NODE'
+        const assert = require('node:assert/strict');
+        const fs = require('node:fs');
+        const path = require('node:path');
+        const {execFileSync} = require('node:child_process');
+        const root = fs.realpathSync(process.cwd());
+        const manifest = require(path.join(root, 'package.json'));
+        assert.equal(manifest.name, 'rn-update-cli');
+        const entry = typeof manifest.bin === 'string' ? manifest.bin : manifest.bin.pakta;
+        assert(entry && fs.statSync(path.join(root, entry)).isFile(), 'built CLI entry is missing');
+        const commit = execFileSync('git', ['rev-parse', 'HEAD'], {encoding: 'utf8'}).trim();
+        assert(/^[0-9a-f]{40}$/.test(commit));
+        fs.appendFileSync(process.env.GITHUB_ENV, `RNU_CLI_ROOT=${root}\n`);
+        fs.appendFileSync(process.env.GITHUB_OUTPUT, `root=${root}\ncommit=${commit}\n`);
+        console.log(`Public CLI rn-update-cli@${manifest.version} commit=${commit} root=${root}`);
+        NODE

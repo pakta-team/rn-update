@@ -68,6 +68,8 @@ c++ \
 "$BUILD_DIR/patch_core_test" "$ROOT_DIR/cpp/patch_core/tests/fixtures"
 "$BUILD_DIR/hbc_transform_test" "$ROOT_DIR/cpp/patch_core/tests/fixtures"
 
+sh "$ROOT_DIR/scripts/test-install-core.sh"
+
 # Opt-in libFuzzer run of the hbcTransform wire parser (untrusted __diff.json
 # metadata): FUZZ=1 npm run test:patch-core. Needs clang with the libFuzzer
 # runtime (libclang_rt.fuzzer); without it the step is skipped, not failed.

@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 Android UpdateContext 与 Harmony UpdateContext 共同遵守的整数操作协议
+ * [INPUT]: 操作码声明由 scripts/contract.json 的 stateOperations 经 generate-contract.js 派生
  * [OUTPUT]: 对外提供稳定且只能追加的 StateOperation 操作码枚举
- * [POS]: patch_core 的跨平台状态命令事实源，连接纯 state_core 与各平台持久化桥
+ * [POS]: patch_core 的跨平台状态命令消费头，连接纯 state_core 与平台持久化桥，不生成状态转换或 IO
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #pragma once

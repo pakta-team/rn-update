@@ -26,7 +26,13 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 public class InstallRecordTest {
+    @org.junit.BeforeClass public static void requireNative() {
+        SharedInstallNativeTest.requireNative();
+    }
+
     private static final String HASH = "0123456789abcdef";
+    private static final String DIGEST = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    private static final String[] NONEMPTY_EMPTY_OBJECTS = {"{}", " { } ", "\n{\r\n\t}\n"};
 
     @Rule
     public TemporaryFolder temp = new TemporaryFolder();
@@ -47,23 +53,36 @@ public class InstallRecordTest {
     }
 
     @Test
-    public void buildWritesSchemaAndOnlyPresentDigests() throws JSONException {
-        JSONObject full = new JSONObject(InstallRecord.build(HASH, "bb", "aa"));
+    public void buildWritesSchemaAndDigests() throws Exception {
+        JSONObject full = new JSONObject(InstallRecord.build(HASH, DIGEST, "aa"));
         assertEquals(InstallRecord.SCHEMA, full.getInt("schema"));
         assertEquals(HASH, full.getString("versionHash"));
-        assertEquals("bb", full.getString("bundleSha256"));
+        assertEquals(DIGEST, full.getString("bundleSha256"));
         assertEquals("aa", full.getString("artifactSha256"));
 
-        JSONObject bare = new JSONObject(InstallRecord.build(HASH, "", null));
-        assertEquals(HASH, bare.getString("versionHash"));
-        assertFalse(bare.has("bundleSha256"));
-        assertFalse(bare.has("artifactSha256"));
+        // artifactSha256 is optional diagnostics.
+        JSONObject noArtifact = new JSONObject(InstallRecord.build(HASH, DIGEST, null));
+        assertEquals(DIGEST, noArtifact.getString("bundleSha256"));
+        assertFalse(noArtifact.has("artifactSha256"));
+    }
+
+    @Test
+    public void buildRefusesARecordWithoutBundleDigest() throws Exception {
+        for (String missing : new String[] {"", null}) {
+            try {
+                InstallRecord.build(HASH, missing, "aa");
+                fail("a record without bundleSha256 must not be built");
+            } catch (IOException expected) {
+                assertTrue(expected.getMessage().contains("bundle digest"));
+            }
+        }
     }
 
     @Test
     public void writeThenReadRoundTrips() throws Exception {
         File dir = temp.newFolder();
-        InstallRecord.write(dir, InstallRecord.build(HASH, "bb", "aa"));
+        writeFile(new File(dir, "index.bundlejs"), new byte[0]);
+        InstallRecord.write(dir, InstallRecord.build(HASH, DIGEST, "aa"));
         assertTrue(new File(dir, InstallRecord.FILE_NAME).isFile());
 
         JSONObject record = InstallRecord.read(dir);
@@ -80,6 +99,7 @@ public class InstallRecordTest {
         assertFalse(InstallRecord.isComplete(dir, HASH));
 
         // Legacy marker: an empty file counts as complete for any hash.
+        writeFile(new File(dir, "index.bundlejs"), new byte[0]);
         File marker = new File(dir, InstallRecord.FILE_NAME);
         writeFile(marker, new byte[0]);
         JSONObject legacy = InstallRecord.read(dir);
@@ -95,6 +115,44 @@ public class InstallRecordTest {
         Arrays.fill(oversized, (byte) ' ');
         writeFile(marker, oversized);
         assertNull(InstallRecord.read(dir));
+    }
+
+    @Test
+    public void readRejectsNonemptyEmptyObjects() throws Exception {
+        File dir = temp.newFolder();
+        File marker = new File(dir, InstallRecord.FILE_NAME);
+        for (String content : NONEMPTY_EMPTY_OBJECTS) {
+            writeFile(marker, content.getBytes(StandardCharsets.UTF_8));
+            assertTrue(marker.length() > 0);
+            assertNull(content, InstallRecord.read(dir));
+        }
+    }
+
+    @Test
+    public void isCompleteRejectsNonemptyEmptyObjects() throws Exception {
+        File dir = temp.newFolder();
+        File marker = new File(dir, InstallRecord.FILE_NAME);
+        for (String content : NONEMPTY_EMPTY_OBJECTS) {
+            writeFile(marker, content.getBytes(StandardCharsets.UTF_8));
+            assertFalse(content, InstallRecord.isComplete(dir, HASH));
+        }
+    }
+
+    @Test
+    public void verifyForActivationRejectsNonemptyEmptyObjects() throws Exception {
+        File dir = temp.newFolder();
+        File bundle = new File(dir, "index.bundlejs");
+        writeFile(bundle, "tampered".getBytes(StandardCharsets.UTF_8));
+        File marker = new File(dir, InstallRecord.FILE_NAME);
+        for (String content : NONEMPTY_EMPTY_OBJECTS) {
+            writeFile(marker, content.getBytes(StandardCharsets.UTF_8));
+            try {
+                InstallRecord.verifyForActivation(dir, HASH, bundle);
+                fail("nonempty empty object must not activate: " + content);
+            } catch (IOException expected) {
+                assertTrue(expected.getMessage().contains("completion record"));
+            }
+        }
     }
 
     @Test
@@ -134,14 +192,24 @@ public class InstallRecordTest {
     }
 
     @Test
-    public void verifyForActivationAcceptsRecordsWithoutDigestAndLegacyMarkers() throws Exception {
+    public void verifyForActivationAcceptsLegacyMarkersAndRejectsDigestlessRecords() throws Exception {
         File dir = temp.newFolder();
         File bundle = new File(dir, "index.bundlejs");
         writeFile(bundle, "x".getBytes(StandardCharsets.UTF_8));
 
-        InstallRecord.write(dir, InstallRecord.build(HASH, "", ""));
-        InstallRecord.verifyForActivation(dir, HASH, bundle);
+        // 旧 SDK 写出的无摘要 schema-1 记录不得激活。
+        JSONObject digestless = new JSONObject();
+        digestless.put("schema", InstallRecord.SCHEMA);
+        digestless.put("versionHash", HASH);
+        writeFile(new File(dir, InstallRecord.FILE_NAME), digestless.toString().getBytes(StandardCharsets.UTF_8));
+        try {
+            InstallRecord.verifyForActivation(dir, HASH, bundle);
+            fail("a digest-less record must not activate");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("completion record mismatch"));
+        }
 
+        // 旧版空标记仍然可信。
         writeFile(new File(dir, InstallRecord.FILE_NAME), new byte[0]);
         InstallRecord.verifyForActivation(dir, HASH, bundle);
     }
@@ -155,10 +223,10 @@ public class InstallRecordTest {
             InstallRecord.verifyForActivation(dir, HASH, bundle);
             fail("missing record must not activate");
         } catch (IOException expected) {
-            assertTrue(expected.getMessage().contains("no valid completion record"));
+            assertTrue(expected.getMessage().contains("incomplete"));
         }
 
-        InstallRecord.write(dir, InstallRecord.build("anotherhash", "", ""));
+        InstallRecord.write(dir, InstallRecord.build("anotherhash", DIGEST, ""));
         try {
             InstallRecord.verifyForActivation(dir, HASH, bundle);
             fail("record for another version must not activate");

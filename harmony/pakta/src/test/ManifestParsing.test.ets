@@ -106,7 +106,7 @@ export default function manifestParsingTest() {
         },
       };
       const result = parseManifestToArrays(manifest as any, false);
-      expect(result.copyFroms[0]).assertEqual('');
+      expect(result.copyFroms[0]).assertEqual('assets/icon.png');
       expect(result.copyTos[0]).assertEqual('assets/icon.png');
     });
   });

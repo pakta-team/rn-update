@@ -34,6 +34,7 @@ import NativePatchCore, {
 } from './NativePatchCore';
 import { assertSafePathComponent } from './PathUtils';
 import {
+  ERROR_PATCH_FAILED,
   ERROR_SWITCH_VERSION_FAILED,
   createUpdateError,
   getErrorMessage,
@@ -214,6 +215,18 @@ export class UpdateContext {
         TAG,
         `Failed to read build time from raw file: ${getErrorMessage(error)}`,
       );
+    }
+    // 绝不返回空串(与 iOS 用 Info.plist mtime 兜底一致):buildTime 为空时
+    // syncStateWithBinaryVersion 整体跳过,保留 versionName 的重装二进制会
+    // 让旧热更活过应用升级。每次(覆盖)安装 updateTime 都会变,用它顶替。
+    const updateTime = this.getBundleUpdateTime();
+    if (updateTime > 0) {
+      logger.warn(
+        TAG,
+        'meta.json has no build stamp; using the app install time as buildTime',
+      );
+      UpdateContext.cachedBuildTime = String(updateTime);
+      return UpdateContext.cachedBuildTime;
     }
     return '';
   }
@@ -457,8 +470,10 @@ export class UpdateContext {
     return run;
   }
 
-  private async executeTask(params: DownloadTaskParams): Promise<void> {
+  private async executeTask(params: DownloadTaskParams, assertCurrent: () => void = () => {}): Promise<void> {
+    const generation = UpdateContext.resetGeneration;
     await this.enqueueSerialTask(() => {
+      assertCurrent();
       const isPatchTask =
         params.type === DownloadTaskParams.TASK_TYPE_PATCH_FULL ||
         params.type === DownloadTaskParams.TASK_TYPE_PATCH_FROM_APP ||
@@ -468,7 +483,12 @@ export class UpdateContext {
       if (isPatchTask && this.hasDownloadedVersion(params.hash)) {
         return Promise.resolve();
       }
-      const downloadTask = new DownloadTask(this.context);
+      const downloadTask = new DownloadTask(this.context, () => {
+        assertCurrent();
+        if (isPatchTask && generation !== UpdateContext.resetGeneration) {
+          throw createUpdateError(ERROR_PATCH_FAILED, 'Install invalidated by reset.');
+        }
+      });
       return downloadTask.execute(params);
     });
   }
@@ -511,29 +531,7 @@ export class UpdateContext {
       UpdateContext.resetGeneration += 1;
     }
     this.cleanUp();
-    if (forceReset) {
-      const api = this.optionalPreferencesApi();
-      if (typeof api.getAllSync === 'function') {
-        try {
-          const all = api.getAllSync();
-          for (const key of Object.keys(all)) {
-            if (key.startsWith('hash_')) {
-              this.preferences.deleteSync(key);
-            }
-          }
-        } catch (e) {
-          logger.error(
-            TAG,
-            `Failed to clear channel hash info: ${getErrorMessage(e)}`,
-          );
-        }
-      }
-      this.preferences.deleteSync(KEY_RESP_CACHE);
-    }
-    // 仅重置状态机字段（currentVersion / lastVersion / firstTime / firstTimeOk /
-    // rolledBackVersion）。不再 clearExisting，避免连带清除 uuid / firstLoadMarked /
-    // hash_* 等与 binary 版本无关的 KV —— 它们在多实例场景下本就脆弱，连带清除会
-    // 让 getConstants() 永远读到空，从而 isFirstTime=false、markSuccess 永不执行。
+    this.clearVersionScopedState();
     this.writeState(nextState, {});
     this.flushInBackground('sync binary version');
   }
@@ -626,12 +624,25 @@ export class UpdateContext {
     this.flushInBackground('clear rollback mark');
   }
 
-  /**
-   * 恢复到二进制内置包：清空整个更新状态机（下次启动即回内置 bundle）并删除
-   * 已下载版本——仅保留当前运行版本的目录（静默 reset 不能破坏运行中 bundle
-   * 的按需资源加载）。uuid 保留 —— 它标识安装实例、用于灰度分桶，reset 不应改变。
-   * 状态与响应缓存一次落盘;落盘失败拒绝(JS 按 RESET_FAILED 处理)。
-   */
+  private clearVersionScopedState(): void {
+    this.preferences.deleteSync('firstLoadMarked');
+    this.preferences.deleteSync(KEY_RESP_CACHE);
+    const api = this.optionalPreferencesApi();
+    if (typeof api.getAllSync !== 'function') {
+      return;
+    }
+    try {
+      const all = api.getAllSync();
+      for (const key of Object.keys(all)) {
+        if (key.startsWith('hash_')) {
+          this.preferences.deleteSync(key);
+        }
+      }
+    } catch (e) {
+      logger.error(TAG, `Failed to clear version hash info: ${getErrorMessage(e)}`);
+    }
+  }
+
   public async resetToPackagedBundle(): Promise<void> {
     this.trace('resetToPackagedBundle:before');
     // 实时读取二进制身份（与 Android/iOS 对齐），而非 preferences 快照：
@@ -652,28 +663,9 @@ export class UpdateContext {
     this.beginFlushBatch();
     let flushed: Promise<void> = Promise.resolve();
     try {
-      // 删除已下载版本的 hash_* 元信息（不走 clear()：它是异步的，且会连带清掉
-      // uuid —— 见 syncStateWithBinaryVersion 的注释）。getAllSync 在旧 SDK 上
-      // 可能不存在，此时残留的 hash_* 只是无害孤儿数据，不影响 reset 语义。
-      const api = this.optionalPreferencesApi();
-      if (typeof api.getAllSync === 'function') {
-        try {
-          const all = api.getAllSync();
-          for (const key of Object.keys(all)) {
-            if (key.startsWith('hash_')) {
-              this.preferences.deleteSync(key);
-            }
-          }
-        } catch (e) {
-          logger.error(
-            TAG,
-            `Failed to clear hash info on reset: ${getErrorMessage(e)}`,
-          );
-        }
-      }
-      this.writeState(resetState, { clearFirstLoadMarker: true });
-      // 缓存里的响应仍在宣告本次 reset 刚删掉的版本,一并丢弃,避免 JS 侧复用。
-      this.preferences.deleteSync(KEY_RESP_CACHE);
+      this.clearVersionScopedState();
+      this.writeState(resetState, {});
+      this.preferences.putSync('binaryChannel', this.getChannel());
     } finally {
       flushed = this.endFlushBatch('reset to packaged bundle');
     }
@@ -713,36 +705,55 @@ export class UpdateContext {
     hashInfoJson: string,
     activate: boolean,
     responseCacheJson: string,
+    expectedConfigGeneration: number = UpdateContext.nativeConfigGeneration,
   ): Promise<boolean> {
-    if (UpdateContext.resetGeneration !== expectedGeneration) {
-      return false;
-    }
-    const shouldSwitch = activate && !!hash;
-    if (shouldSwitch) {
-      await this.verifyActivation(hash);
-      if (UpdateContext.resetGeneration !== expectedGeneration) {
+    return this.enqueueSerialTask(async () => {
+      if (UpdateContext.resetGeneration !== expectedGeneration ||
+          UpdateContext.nativeConfigGeneration !== expectedConfigGeneration) {
         return false;
       }
-    }
-    // One flush for the whole round (see beginFlushBatch): version info,
-    // activation and response cache land together or not at all.
-    this.beginFlushBatch();
-    let flushed: Promise<void> = Promise.resolve();
-    try {
-      if (hash && hashInfoJson) {
-        this.preferences.putSync(`hash_${hash}`, hashInfoJson);
-      }
+      const shouldSwitch = activate && !!hash;
       if (shouldSwitch) {
-        this.applySwitch(hash);
+        const snapshot = await this.verifyActivation(hash);
+        if (UpdateContext.resetGeneration !== expectedGeneration ||
+            UpdateContext.nativeConfigGeneration !== expectedConfigGeneration) {
+          return false;
+        }
+        NativePatchCore.installActivationUnchanged(snapshot);
       }
-      if (responseCacheJson) {
-        this.preferences.putSync(KEY_RESP_CACHE, responseCacheJson);
+      this.beginFlushBatch();
+      let flushed: Promise<void> = Promise.resolve();
+      try {
+        if (hash && hashInfoJson) {
+          this.preferences.putSync(`hash_${hash}`, hashInfoJson);
+        }
+        if (shouldSwitch) {
+          this.applySwitch(hash);
+        }
+        if (responseCacheJson) {
+          this.preferences.putSync(KEY_RESP_CACHE, responseCacheJson);
+        }
+      } finally {
+        flushed = this.endFlushBatch('commit native check result');
       }
-    } finally {
-      flushed = this.endFlushBatch('commit native check result');
-    }
-    await flushed;
-    return true;
+      await flushed;
+      return true;
+    });
+  }
+
+  public async downloadNativeRound(strategy: string, url: string, hash: string,
+    originHash: string, deadline: number, assertCurrent: () => void): Promise<void> {
+    const type = strategy === 'diff' ? DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK
+      : strategy === 'pdiff' ? DownloadTaskParams.TASK_TYPE_PATCH_FROM_APP
+      : DownloadTaskParams.TASK_TYPE_PATCH_FULL;
+    const params = this.createTaskParams(type, url, hash);
+    params.originHash = originHash ? assertSafePathComponent(originHash) : '';
+    params.targetFile = strategy === 'diff' ? `${this.rootDir}/${params.originHash}_${hash}.ppk.patch`
+      : strategy === 'pdiff' ? `${this.rootDir}/${hash}.app.patch` : `${this.rootDir}/${hash}.ppk`;
+    params.unzipDirectory = `${this.rootDir}/${hash}`;
+    if (originHash) params.originDirectory = `${this.rootDir}/${params.originHash}`;
+    params.deadlineUptimeMs = deadline;
+    await this.executeTask(params, assertCurrent);
   }
 
   public async downloadFullUpdate(
@@ -838,43 +849,19 @@ export class UpdateContext {
   }
 
   /**
-   * 激活前置校验(同步,不写任何东西):bundle 在盘上,且要么是本 SDK 记录为
-   * 完整安装的版本(bundle + 记录),要么是标记机制之前就激活过的历史版本
-   * (current/last 里有它)。其他无记录的目录可能是崩溃留下的半成品。
-   * 返回是否还需复核安装记录里的 bundle 摘要(历史版本无记录可核)。
-   */
-  private assertActivatable(safeHash: string): boolean {
-    if (!fileIo.accessSync(this.getBundlePath(safeHash))) {
-      throw createUpdateError(
-        ERROR_SWITCH_VERSION_FAILED,
-        `Bundle version ${safeHash} not found.`,
-      );
-    }
-    const legacyActivated =
-      this.readString('currentVersion') === safeHash ||
-      this.readString('lastVersion') === safeHash;
-    if (!this.hasDownloadedVersion(safeHash) && !legacyActivated) {
-      throw createUpdateError(
-        ERROR_SWITCH_VERSION_FAILED,
-        `Bundle version ${safeHash} is incomplete.`,
-      );
-    }
-    return !legacyActivated;
-  }
-
-  /**
    * 完整的激活校验(含 native 工作线程上的 bundle 摘要复核),不写状态。
    * 记录里的 bundle 摘要必须与盘上字节一致,才能把下次启动指向它。
    */
-  public async verifyActivation(hash: string): Promise<void> {
+  public async verifyActivation(hash: string): Promise<object> {
     const safeHash = assertSafePathComponent(hash);
-    if (this.assertActivatable(safeHash)) {
-      await verifyInstallForActivation(
-        `${this.rootDir}/${safeHash}`,
-        safeHash,
-        this.getBundlePath(safeHash),
-      );
-    }
+    const grandfathered = this.readString('currentVersion') === safeHash ||
+      this.readString('lastVersion') === safeHash;
+    return verifyInstallForActivation(
+      `${this.rootDir}/${safeHash}`,
+      safeHash,
+      this.getBundlePath(safeHash),
+      grandfathered,
+    );
   }
 
   /** 内存里切换状态(不落盘);调用方负责 flush。 */
@@ -888,10 +875,17 @@ export class UpdateContext {
   /** 校验 + 切换 + 落盘;任一步失败拒绝(SWITCH_VERSION_FAILED)。 */
   public async switchVersion(hash: string): Promise<void> {
     try {
-      const safeHash = assertSafePathComponent(hash);
-      await this.verifyActivation(safeHash);
-      this.applySwitch(safeHash);
-      await this.flushPreferences(`switch version ${safeHash}`);
+      await this.enqueueSerialTask(async () => {
+        const safeHash = assertSafePathComponent(hash);
+        const generation = UpdateContext.resetGeneration;
+        const snapshot = await this.verifyActivation(safeHash);
+        if (UpdateContext.resetGeneration !== generation) {
+          throw createUpdateError(ERROR_SWITCH_VERSION_FAILED, 'Activation invalidated by reset.');
+        }
+        NativePatchCore.installActivationUnchanged(snapshot);
+        this.applySwitch(safeHash);
+        await this.flushPreferences(`switch version ${safeHash}`);
+      });
     } catch (e) {
       logger.error(TAG, `Failed to switch version: ${getErrorMessage(e)}`);
       throw toUpdateError(e, ERROR_SWITCH_VERSION_FAILED);

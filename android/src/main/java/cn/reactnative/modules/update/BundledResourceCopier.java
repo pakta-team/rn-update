@@ -1,14 +1,13 @@
 /**
- * [INPUT]: 依赖 Android Context/Resources、base 与 split APK、SafeZipFile、UpdateFileUtils 以及补丁 copies/copiesCrc 清单
- * [OUTPUT]: 对内提供 copyFromResource，按精确路径、规范化资源名或 CRC 内容匹配复制未变资源到多个目标
+ * [INPUT]: 依赖 Android Context/Resources、base 与 split APK、SafeZipFile、UpdateFileUtils、UpdateContext.TAG 及 DownloadTask 校验后的目标文件 map 与独立 CRC map
+ * [OUTPUT]: 对内提供 copyFromResource，按路径或 CRC 复制未变资源到多个目标；只读消费两个 map，密度替代从目标文件父目录恢复资源限定符
  * [POS]: Android pdiff 资源物化器，连接安装包内容与 DownloadTask 补丁目录，并在重打包内容漂移时主动失败
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
+
 package cn.reactnative.modules.update;
 
 import android.content.Context;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.util.DisplayMetrics;
 import android.util.Log;
@@ -19,28 +18,35 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.zip.ZipEntry;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class BundledResourceCopier {
     private static final Pattern VERSION_QUALIFIER_PATTERN = Pattern.compile("-v\\d+(?=/)");
     private static final String AAB_BASE_PREFIX = "base/";
+    // split_config.xxhdpi.apk, split_feature.config.xxhdpi.apk
+    private static final Pattern DENSITY_SPLIT_PATTERN =
+        Pattern.compile("(?:^|[._])config\\.((?:ld|md|hd|xhd|xxhd|xxxhd|tvd)pi)\\.apk$");
 
     private final Context context;
 
     private static final class ResolvedResourceSource {
         final int resourceId;
         final String assetPath;
+        final int density;
 
-        ResolvedResourceSource(int resourceId, String assetPath) {
+        ResolvedResourceSource(int resourceId, String assetPath, int density) {
             this.resourceId = resourceId;
             this.assetPath = assetPath;
+            this.density = density;
         }
     }
 
-    // Holds the exact archive a CRC32 match came from, so the fallback copy
-    // reads from that archive even if another APK exposes the same entry name
-    // with different bytes.
+    // An entry together with the exact archive it came from, so a copy reads
+    // from that archive even if another APK exposes the same entry name with
+    // different bytes.
     private static final class ZipSource {
         final ZipEntry entry;
         final SafeZipFile zipFile;
@@ -60,9 +66,10 @@ final class BundledResourceCopier {
         HashMap<String, Long> crcByFrom
     ) throws IOException {
         ArrayList<String> apkPaths = collectApkPaths();
-        HashMap<String, ZipEntry> availableEntries = new HashMap<String, ZipEntry>();
-        HashMap<String, SafeZipFile> zipFileMap = new HashMap<String, SafeZipFile>();
-        HashMap<String, SafeZipFile> entryToZipFileMap = new HashMap<String, SafeZipFile>();
+        HashSet<String> installedDensities = installedSplitDensities(apkPaths);
+        ArrayList<SafeZipFile> zipFiles = new ArrayList<SafeZipFile>();
+        // Entry name -> first archive (base APK first) that carries it.
+        HashMap<String, ZipSource> availableEntries = new HashMap<String, ZipSource>();
         // Content checksum index: CRC32 -> matched archive source. Lets us
         // locate a file by content when its origin path is not present verbatim
         // on device (e.g. APK baseline diff applied on an AAB/split-apk install
@@ -72,18 +79,18 @@ final class BundledResourceCopier {
         try {
             for (String apkPath : apkPaths) {
                 SafeZipFile zipFile = new SafeZipFile(new File(apkPath));
-                zipFileMap.put(apkPath, zipFile);
+                zipFiles.add(zipFile);
                 Enumeration<? extends ZipEntry> entries = zipFile.entries();
                 while (entries.hasMoreElements()) {
                     ZipEntry ze = entries.nextElement();
-                    String entryName = ze.getName();
-                    if (!availableEntries.containsKey(entryName)) {
-                        availableEntries.put(entryName, ze);
-                        entryToZipFileMap.put(entryName, zipFile);
+                    ZipSource source = new ZipSource(ze, zipFile);
+                    // No Map.putIfAbsent: it is API 24+ and minSdk is 21.
+                    if (!availableEntries.containsKey(ze.getName())) {
+                        availableEntries.put(ze.getName(), source);
                     }
                     long crc = ze.getCrc();
                     if (crc != -1L && !crcToEntry.containsKey(crc)) {
-                        crcToEntry.put(crc, new ZipSource(ze, zipFile));
+                        crcToEntry.put(crc, source);
                     }
                 }
             }
@@ -91,10 +98,11 @@ final class BundledResourceCopier {
             HashMap<String, String> normalizedEntryMap = new HashMap<String, String>();
             for (String entryName : availableEntries.keySet()) {
                 String normalized = normalizeResPath(entryName);
-                normalizedEntryMap.putIfAbsent(normalized, entryName);
+                if (!normalizedEntryMap.containsKey(normalized)) {
+                    normalizedEntryMap.put(normalized, entryName);
+                }
             }
 
-            SafeZipFile baseZipFile = zipFileMap.get(context.getPackageResourcePath());
             HashMap<String, ArrayList<File>> remainingFiles =
                 new HashMap<String, ArrayList<File>>(resToCopy);
             // Track copies that were located but failed to write. These are real
@@ -108,6 +116,7 @@ final class BundledResourceCopier {
             // these fail the whole patch — the JS strategy chain then falls
             // back to the full package.
             ArrayList<String> crcMismatches = new ArrayList<String>();
+            int substitutedDensities = 0;
 
             for (String fromPath : new ArrayList<String>(remainingFiles.keySet())) {
                 ArrayList<File> targets = remainingFiles.get(fromPath);
@@ -115,11 +124,11 @@ final class BundledResourceCopier {
                     continue;
                 }
 
-                ZipEntry entry = availableEntries.get(fromPath);
+                ZipSource entry = availableEntries.get(fromPath);
                 String actualSourcePath = fromPath;
-                SafeZipFile matchedZipFile = null;
                 ResolvedResourceSource resolvedResource = null;
-                Long wantedCrc = crcByFrom != null ? crcByFrom.get(fromPath) : null;
+                Long wantedCrc = crcByFrom.get(fromPath);
+                boolean pathMatchDrifted = false;
 
                 if (entry == null) {
                     String normalizedFrom = normalizeResPath(fromPath);
@@ -136,9 +145,11 @@ final class BundledResourceCopier {
                 // locate the expected content elsewhere. An entry with an
                 // unknown CRC (-1) cannot be verified and is accepted as-is.
                 if (entry != null && wantedCrc != null
-                    && entry.getCrc() != -1L && entry.getCrc() != wantedCrc.longValue()) {
+                    && entry.entry.getCrc() != -1L
+                    && entry.entry.getCrc() != wantedCrc.longValue()) {
                     entry = null;
                     actualSourcePath = fromPath;
+                    pathMatchDrifted = true;
                 }
 
                 // Content (CRC32) match: robust across APK/AAB packaging because
@@ -147,9 +158,45 @@ final class BundledResourceCopier {
                 if (entry == null && wantedCrc != null) {
                     ZipSource matched = crcToEntry.get(wantedCrc);
                     if (matched != null) {
-                        entry = matched.entry;
-                        matchedZipFile = matched.zipFile;
+                        entry = matched;
                         actualSourcePath = matched.entry.getName();
+                    }
+                }
+
+                // A density split install only carries the device's density,
+                // so the expected bytes of another density cannot be on disk.
+                // That is not drift: fill the targets with the installed
+                // variant, because the JS side picks drawable-<scale>/ by the
+                // current PixelRatio and a missing file is a broken image.
+                if (entry == null && wantedCrc != null && !pathMatchDrifted) {
+                    String[] toPaths = new String[targets.size()];
+                    for (int i = 0; i < targets.size(); i++) {
+                        File target = targets.get(i);
+                        toPaths[i] = target.getParentFile().getName() + "/" + target.getName();
+                    }
+                    ZipSource[] substitutes = resolveDensitySubstitutes(
+                        toPaths, installedDensities, availableEntries
+                    );
+                    if (substitutes != null) {
+                        for (int i = 0; i < substitutes.length; i++) {
+                            File target = targets.get(i);
+                            try {
+                                substitutes[i].zipFile.unzipToFile(substitutes[i].entry, target);
+                                substitutedDensities++;
+                            } catch (IOException e) {
+                                Log.e(
+                                    UpdateContext.TAG,
+                                    "Failed to copy resource "
+                                        + substitutes[i].entry.getName()
+                                        + " to "
+                                        + target,
+                                    e
+                                );
+                                failedCopies.add(substitutes[i].entry.getName() + " -> " + target);
+                            }
+                        }
+                        remainingFiles.remove(fromPath);
+                        continue;
                     }
                 }
 
@@ -172,7 +219,7 @@ final class BundledResourceCopier {
                         // archives so the right variant is used. (openRawResource
                         // would re-resolve the id at the current configuration
                         // density and ignore the requested one.)
-                        ZipEntry resolvedEntry = availableEntries.get(actualSourcePath);
+                        ZipSource resolvedEntry = availableEntries.get(actualSourcePath);
                         if (resolvedEntry != null) {
                             entry = resolvedEntry;
                             resolvedResource = null;
@@ -190,13 +237,7 @@ final class BundledResourceCopier {
                         if (lastTarget != null) {
                             UpdateFileUtils.copyFile(lastTarget, target);
                         } else if (entry != null) {
-                            SafeZipFile sourceZipFile = matchedZipFile != null
-                                ? matchedZipFile
-                                : entryToZipFileMap.get(actualSourcePath);
-                            if (sourceZipFile == null) {
-                                sourceZipFile = baseZipFile;
-                            }
-                            sourceZipFile.unzipToFile(entry, target);
+                            entry.zipFile.unzipToFile(entry.entry, target);
                         } else {
                             InputStream in = openResolvedResourceStream(resolvedResource);
                             UpdateFileUtils.copyInputStreamToFile(in, target);
@@ -234,6 +275,15 @@ final class BundledResourceCopier {
                 );
             }
 
+            if (substitutedDensities > 0) {
+                Log.i(
+                    UpdateContext.TAG,
+                    "Filled " + substitutedDensities
+                        + " density variants missing from this split install ("
+                        + installedDensities + ") with the installed variant"
+                );
+            }
+
             if (!remainingFiles.isEmpty()) {
                 Log.w(
                     UpdateContext.TAG,
@@ -241,8 +291,95 @@ final class BundledResourceCopier {
                 );
             }
         } finally {
-            closeZipFiles(zipFileMap);
+            closeZipFiles(zipFiles);
         }
+    }
+
+    private ZipSource[] resolveDensitySubstitutes(
+        String[] toPaths,
+        HashSet<String> installedDensities,
+        HashMap<String, ZipSource> availableEntries
+    ) {
+        if (!canSubstituteDensityVariant(toPaths, installedDensities)) {
+            return null;
+        }
+        ZipSource[] substitutes = new ZipSource[toPaths.length];
+        for (int i = 0; i < toPaths.length; i++) {
+            ResolvedResourceSource resolved = resolveBundledResource(toPaths[i]);
+            // Resolving to the target's own density means this very variant is
+            // installed, so its bytes should have matched: that is drift. So is
+            // a resource the binary no longer has. bundletool can place another
+            // density's variant in the device's split, so the split name alone
+            // does not settle this.
+            if (resolved == null
+                || Integer.valueOf(resolved.density).equals(densityOf(toPaths[i]))) {
+                return null;
+            }
+            substitutes[i] = availableEntries.get(resolved.assetPath);
+            if (substitutes[i] == null) {
+                return null;
+            }
+        }
+        return substitutes;
+    }
+
+    /**
+     * Whether copy targets can be outside what a density split install carries.
+     * Only the targets can tell: release APKs shorten res/ paths (res/5u.png),
+     * so the manifest's source path says nothing about its density.
+     */
+    static boolean canSubstituteDensityVariant(
+        String[] toPaths,
+        HashSet<String> installedDensities
+    ) {
+        if (installedDensities.isEmpty() || toPaths == null || toPaths.length == 0) {
+            return false;
+        }
+        for (String toPath : toPaths) {
+            String directory = resourceDirectory(toPath);
+            if (!toPath.startsWith("drawable-")
+                || densityOf(toPath) == null
+                // Another qualifier (drawable-night-hdpi) would not survive the
+                // lookup, which resolves those from the current configuration.
+                || !directory.equals("drawable-" + densityQualifier(directory))
+                || installedDensities.contains(densityQualifier(directory))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static Integer densityOf(String resourcePath) {
+        String directory = resourceDirectory(resourcePath);
+        return directory == null ? null : parseDensityQualifier(directory);
+    }
+
+    private static String densityQualifier(String directory) {
+        for (String qualifier : directory.split("-")) {
+            if (parseDensityQualifier(qualifier) != null) {
+                return qualifier;
+            }
+        }
+        return null;
+    }
+
+    private static String resourceDirectory(String resourcePath) {
+        String path = resourcePath.startsWith("res/")
+            ? resourcePath.substring("res/".length())
+            : resourcePath;
+        int slash = path.indexOf('/');
+        return slash <= 0 ? null : path.substring(0, slash);
+    }
+
+    static HashSet<String> installedSplitDensities(ArrayList<String> apkPaths) {
+        HashSet<String> densities = new HashSet<String>();
+        for (String apkPath : apkPaths) {
+            Matcher matcher = DENSITY_SPLIT_PATTERN.matcher(new File(apkPath).getName());
+            if (matcher.find()) {
+                densities.add(matcher.group(1));
+            }
+        }
+        return densities;
     }
 
     private String normalizeResPath(String path) {
@@ -272,7 +409,7 @@ final class BundledResourceCopier {
         return fileName.substring(0, extensionIndex);
     }
 
-    private Integer parseDensityQualifier(String directoryName) {
+    private static Integer parseDensityQualifier(String directoryName) {
         String[] qualifiers = directoryName.split("-");
         for (String qualifier : qualifiers) {
             if ("ldpi".equals(qualifier)) {
@@ -346,7 +483,7 @@ final class BundledResourceCopier {
             assetPath = assetPath.substring(1);
         }
 
-        return new ResolvedResourceSource(resourceId, assetPath);
+        return new ResolvedResourceSource(resourceId, assetPath, typedValue.density);
     }
 
     private InputStream openResolvedResourceStream(ResolvedResourceSource source) throws IOException {
@@ -360,33 +497,25 @@ final class BundledResourceCopier {
         }
     }
 
+    // The base APK first, then the split APKs of an AAB install.
     private ArrayList<String> collectApkPaths() {
         ArrayList<String> apkPaths = new ArrayList<String>();
         apkPaths.add(context.getPackageResourcePath());
-
-        try {
-            ApplicationInfo appInfo =
-                context.getPackageManager().getApplicationInfo(context.getPackageName(), 0);
-            if (appInfo.splitSourceDirs != null) {
-                for (String splitPath : appInfo.splitSourceDirs) {
-                    apkPaths.add(splitPath);
-                }
-            }
-        } catch (PackageManager.NameNotFoundException e) {
-            if (UpdateContext.DEBUG) {
-                Log.w(UpdateContext.TAG, "Failed to get application info: " + e.getMessage());
+        String[] splitSourceDirs = context.getApplicationInfo().splitSourceDirs;
+        if (splitSourceDirs != null) {
+            for (String splitPath : splitSourceDirs) {
+                apkPaths.add(splitPath);
             }
         }
-
         return apkPaths;
     }
 
-    private void closeZipFiles(HashMap<String, SafeZipFile> zipFileMap) {
-        for (SafeZipFile zipFile : zipFileMap.values()) {
+    private void closeZipFiles(ArrayList<SafeZipFile> zipFiles) {
+        for (SafeZipFile zipFile : zipFiles) {
             try {
                 zipFile.close();
             } catch (IOException e) {
-                if (UpdateContext.DEBUG) {
+                if (BuildConfig.DEBUG) {
                     Log.w(UpdateContext.TAG, "Failed to close zip file", e);
                 }
             }

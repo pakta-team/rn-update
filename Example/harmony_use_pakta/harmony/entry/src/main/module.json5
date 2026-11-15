@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 HarmonyOS HAP 模块模型、Ability 和资源 profile
- * [OUTPUT]: 声明 entry 模块类型、设备范围、Ability 入口与安装策略
+ * [OUTPUT]: 声明 entry 模块类型、设备范围、Ability 入口、testhotupdate 深链与安装策略
  * [POS]: harmony_use_pakta HAP 运行时清单，连接 ArkUI 页面与 EntryAbility
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -35,6 +35,16 @@
             ],
             "actions": [
               "action.system.home"
+            ]
+          },
+          {
+            "actions": [
+              "ohos.want.action.viewData"
+            ],
+            "uris": [
+              {
+                "scheme": "testhotupdate"
+              }
             ]
           }
         ]

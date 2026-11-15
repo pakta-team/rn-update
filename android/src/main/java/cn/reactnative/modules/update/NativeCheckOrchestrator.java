@@ -1,29 +1,27 @@
 /**
- * [INPUT]: 依赖 UpdateContext 持久配置/提交锁、NativeUpdateFlow 纯决策、OkHttp、DownloadTask 与 CrashRescue 截止时间
- * [OUTPUT]: 对内提供每进程单轮 schedule、isRoundInFlight、runRescue，宿主侧阻塞入口 checkAndUpdate(UpdateContext) 与 onConfigured（就绪时安装 CrashRescue）、hasRunnableConfig 预检，完成检查请求、缓存、下载与受代际保护的激活
+ * [INPUT]: 依赖 UpdateContext 持久配置/提交锁、NativeUpdateFlow 纯决策、OkHttp、DownloadTask 与 CrashRescue 截止时间；HTTP 尝试上限由 scripts/contract.json 的 endpointBudget 派生
+ * [OUTPUT]: 对内提供每进程单轮 schedule、isRoundInFlight、runRescue，宿主侧有界阻塞入口 checkAndUpdate(UpdateContext, timeoutMs) 与 onConfigured；超时仅结束等待，轮次独立运行并保留配置/reset 复核
  * [POS]: Android 无 JS 冷启动更新 IO 编排器；不复制 rollout/响应决策，并以有界失败保障坏 bundle 自救，PaktaNativeUpdate 与 CrashRescue 经其收敛为同一轮
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 package cn.reactnative.modules.update;
 
-import android.os.Build;
 import android.util.Log;
 import androidx.annotation.Nullable;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.HashSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import okhttp3.MediaType;
+import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import okio.BufferedSource;
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -46,7 +44,6 @@ final class NativeCheckOrchestrator {
     // was truncated): that launch resumes immediately instead of waiting 5s.
     static final String KEY_ROUND_INCOMPLETE = "nativeCheckIncomplete";
     private static final int MAX_CHECK_HTTP_ATTEMPTS = 8;
-    private static final long DOWNLOAD_PHASE_TIMEOUT_SECONDS = 600;
     // The check response (and a remote queryUrls list) is a small JSON
     // document; anything bigger is a broken or hijacked endpoint.
     private static final long MAX_CHECK_RESPONSE_BYTES = 1024 * 1024;
@@ -71,6 +68,7 @@ final class NativeCheckOrchestrator {
     // a torn read can only see a stricter (newer) generation.
     private static volatile String unactivatedHash;
     private static volatile long unactivatedGeneration;
+    private static volatile long unactivatedConfigGeneration;
     private static volatile UpdateContext sContext;
     private static volatile String sLaunchRolledBackVersion;
     // Config JSON for which JS reported a completed check in this process
@@ -85,8 +83,14 @@ final class NativeCheckOrchestrator {
     private static volatile long roundConfigGeneration = -1;
     private static volatile String roundConfigJson;
 
-    /** Blocking only on the host API's worker; never call on the UI thread. */
+    static final long DEFAULT_HOST_TIMEOUT_MS = 30 * 60 * 1000L;
+
     static NativeUpdateResult checkAndUpdate(UpdateContext context) throws InterruptedException {
+        return checkAndUpdate(context, DEFAULT_HOST_TIMEOUT_MS);
+    }
+
+    /** 只阻塞宿主等待池；超时不撤销其他调用方、冷启动或救援共用的轮次。 */
+    static NativeUpdateResult checkAndUpdate(UpdateContext context, long timeoutMs) throws InterruptedException {
         if (UpdateContext.DEBUG) {
             return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "debug");
         }
@@ -94,31 +98,36 @@ final class NativeCheckOrchestrator {
             return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "not_initialized");
         }
         String configJson = context.getKv(KEY_CONFIG);
-        if (configJson == null || configJson.isEmpty()) {
-            return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "not_configured");
+        NativeUpdateResult rejection = configRejection(configJson);
+        if (rejection != null) {
+            return rejection;
         }
-        try {
-            JSONObject config = new JSONObject(configJson);
-            if (config.optBoolean("disabled", false)) {
-                return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "disabled");
+        if (claimRound()) {
+            Thread thread = new Thread(new Runnable() {
+                @Override public void run() { runClaimedRound(0); }
+            }, "pakta-native-host-round");
+            thread.setDaemon(true);
+            try {
+                thread.start();
+            } catch (RuntimeException | Error error) {
+                roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "internal_error");
+                roundCompleted = true;
+                roundDone.countDown();
+                throw error;
             }
-            if (config.optString("appKey", "").isEmpty()) {
-                return NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
-            }
-        } catch (JSONException e) {
-            return NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
         }
-        startRound(0);
         if (!roundStarted.get()) {
             return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "config_changed");
         }
-        roundDone.await();
-        if (roundConfigGeneration != UpdateContext.getNativeConfigGeneration()
-            || !configJson.equals(roundConfigJson) || !configJson.equals(context.getKv(KEY_CONFIG))) {
-            return NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "config_changed");
+        if (!roundDone.await(Math.max(0, timeoutMs), TimeUnit.MILLISECONDS)) {
+            return NativeUpdateResult.of(NativeUpdateResult.FAILED, "timeout");
         }
-        if (roundGeneration != UpdateContext.getResetGeneration()) {
-            return NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "reset");
+        String cancelled = NativeUpdateFlow.hostCancellation(configJson, roundConfigJson,
+            context.getKv(KEY_CONFIG), roundConfigGeneration, UpdateContext.getNativeConfigGeneration(),
+            roundGeneration, UpdateContext.getResetGeneration());
+        if (cancelled == null || !cancelled.isEmpty()) {
+            return NativeUpdateResult.of(NativeUpdateResult.CANCELLED,
+                cancelled == null ? "config_changed" : cancelled);
         }
         return roundResult;
     }
@@ -136,7 +145,7 @@ final class NativeCheckOrchestrator {
      */
     private static boolean isJsCheckCompleted(UpdateContext context) {
         String jsConfig = sJsCompletedConfig;
-        return jsConfig != null && jsConfig.equals(context.getKv(KEY_CONFIG));
+        return jsConfig != null && NativeUpdateFlow.configsEquivalent(jsConfig, context.getKv(KEY_CONFIG));
     }
 
     private NativeCheckOrchestrator() {
@@ -190,26 +199,30 @@ final class NativeCheckOrchestrator {
         return roundStarted.get() && !roundCompleted;
     }
 
+    static boolean isCrashRescueActive() {
+        return crashRescueActive;
+    }
+
     /**
      * Runs the process's single round on the calling thread if nobody has
      * started it yet. deadlineNanos > 0 (crash rescue) caps every HTTP call
      * and download phase to the remaining budget.
      */
     private static boolean hasRunnableConfig(UpdateContext context) {
-        if (context == null) {
-            return false;
-        }
+        return context != null && configRejection(context.getKv(KEY_CONFIG)) == null;
+    }
+
+    static NativeUpdateResult configRejection(String json) {
         try {
-            String json = context.getKv(KEY_CONFIG);
-            if (json == null) {
-                return false;
+            String result = NativeUpdateFlow.runnableConfig(json);
+            if (result == null) {
+                return NativeUpdateResult.of(NativeUpdateResult.FAILED, "internal_error");
             }
-            JSONObject config = new JSONObject(json);
-            return !config.optBoolean("disabled", false)
-                && config.opt("appKey") instanceof String
-                && !config.getString("appKey").trim().isEmpty();
+            JSONObject verdict = new JSONObject(result);
+            return verdict.has("status")
+                ? NativeUpdateResult.of(verdict.getString("status"), verdict.getString("reason")) : null;
         } catch (JSONException e) {
-            return false;
+            return NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
         }
     }
 
@@ -220,16 +233,28 @@ final class NativeCheckOrchestrator {
     }
 
     private static void startRound(long deadlineNanos) {
-        // An automatic check before first-run provisioning must not consume
-        // the process's only round. Hosts may configure later in this launch.
-        if (!hasRunnableConfig(sContext)) {
-            return;
+        if (claimRound()) {
+            runClaimedRound(deadlineNanos);
         }
-        if (!roundStarted.compareAndSet(false, true)) {
-            return;
-        }
+    }
+
+    private static boolean claimRound() {
+        return hasRunnableConfig(sContext) && roundStarted.compareAndSet(false, true);
+    }
+
+    private static void runClaimedRound(long deadlineNanos) {
         try {
-            runOnce(sContext, sLaunchRolledBackVersion, deadlineNanos);
+            AndroidRound.Outcome outcome = AndroidRound.run(
+                new DeviceRound(sContext, sLaunchRolledBackVersion), deadlineNanos);
+            roundGeneration = outcome.resetGeneration;
+            roundConfigGeneration = outcome.configGeneration;
+            roundConfigJson = outcome.config;
+            roundResult = outcome.result;
+            if (NativeUpdateResult.DOWNLOADED.equals(roundResult.getStatus())) {
+                unactivatedGeneration = outcome.resetGeneration;
+                unactivatedConfigGeneration = outcome.configGeneration;
+                unactivatedHash = roundResult.isActivated() ? null : roundResult.getHash();
+            }
         } catch (Throwable e) {
             Log.w(UpdateContext.TAG, "native check failed: " + e);
             roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "internal_error");
@@ -287,8 +312,8 @@ final class NativeCheckOrchestrator {
             }
         }
         try {
-            if (context.commitNativeCheckResult(
-                    unactivatedGeneration, hash, hashInfoJson, true, null)) {
+            if (context.commitNativeRoundResult(
+                    unactivatedGeneration, unactivatedConfigGeneration, hash, hashInfoJson, true, null)) {
                 unactivatedHash = null;
                 Log.i(UpdateContext.TAG,
                     "crash rescue: activated downloaded version " + hash);
@@ -301,255 +326,14 @@ final class NativeCheckOrchestrator {
         }
     }
 
-    private static void runOnce(
-        UpdateContext context,
-        String launchRolledBackVersion,
-        long deadlineNanos
-    ) throws JSONException {
-        final long resetGeneration = UpdateContext.getResetGeneration();
-        roundGeneration = resetGeneration;
-        roundConfigGeneration = UpdateContext.getNativeConfigGeneration();
-        roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "check_failed");
-        String configJson = context.getKv(KEY_CONFIG);
-        roundConfigJson = configJson;
-        if (configJson == null || configJson.isEmpty()) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "not_configured");
-            return;
-        }
-        JSONObject config;
-        try {
-            config = new JSONObject(configJson);
-        } catch (JSONException e) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
-            return;
-        }
-        if (config.optBoolean("disabled", false)) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "disabled");
-            return;
-        }
-        String appKey = config.optString("appKey", "");
-        if (appKey.isEmpty()) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
-            return;
-        }
-        // Keep the existing interrupted-round breadcrumb and reset generation.
-        try {
-            context.setKv(KEY_ROUND_INCOMPLETE, "1");
-        } catch (IllegalStateException ignored) {
-        }
-        try {
-            runConfiguredRound(
-                context, launchRolledBackVersion, deadlineNanos,
-                resetGeneration, configJson, config, appKey);
-        } finally {
-            try {
-                context.removeKv(KEY_ROUND_INCOMPLETE);
-            } catch (IllegalStateException ignored) {
-            }
-        }
-    }
-
-    private static void runConfiguredRound(
-        UpdateContext context,
-        String launchRolledBackVersion,
-        long deadlineNanos,
-        long resetGeneration,
-        String configJson,
-        JSONObject config,
-        String appKey
-    ) throws JSONException {
-        String packageVersion = config.optString(
-            "packageVersion", context.getPackageVersion());
-        if (packageVersion.isEmpty()) {
-            packageVersion = context.getPackageVersion();
-        }
-
-        String currentVersion = context.getCurrentVersion();
-        // Snapshot captured on the launch path before getConstants consumes
-        // the one-shot rollback marker. Reading SharedPreferences here, five
-        // seconds later, would lose the guard and could forceBoot the version
-        // that this very launch just rolled back.
-        String rolledBackVersion = launchRolledBackVersion;
-        String uuid = context.getKv("uuid");
-        if (uuid == null) {
-            uuid = "";
-        }
-
-        JSONObject identity = new JSONObject();
-        identity.put("packageVersion", packageVersion);
-        identity.put(
-            "currentVersion",
-            currentVersion == null ? JSONObject.NULL : currentVersion
-        );
-        identity.put("uuid", uuid);
-        if (rolledBackVersion != null) {
-            identity.put("rolledBackVersion", rolledBackVersion);
-        }
-
-        JSONObject cInfo = new JSONObject();
-        cInfo.put("rnu", config.optString("rnu", ""));
-        cInfo.put("rn", config.optString("rn", ""));
-        // React Native's Platform.Version is the Android SDK integer; use the
-        // same value so this request can be fingerprinted against the JS one.
-        cInfo.put("os", "android " + Build.VERSION.SDK_INT);
-        cInfo.put("uuid", uuid);
-
-        JSONObject input = new JSONObject();
-        input.put("packageVersion", packageVersion);
-        // 渠道由宿主 Manifest 固化，不能被 JS/native config 覆盖。
-        input.put("channel", context.getChannel());
-        input.put(
-            "currentVersion",
-            currentVersion == null ? JSONObject.NULL : currentVersion
-        );
-        input.put("buildTime", context.getBuildTime());
-        input.put("cInfo", cInfo);
-        input.put("supportedDiffVersion", NativeUpdateCore.supportedDiffVersion());
-        input.put("bundleHash", context.computeBundleHash());
-
-        String body = NativeUpdateFlow.buildCheckRequestBody(input.toString());
-        if (body == null) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_request");
-            return;
-        }
-
-        String responseText = runCheckRequest(config, appKey, body, deadlineNanos);
-        if (responseText == null) {
-            Log.i(UpdateContext.TAG,
-                "native check: no endpoint reachable, giving up until next launch");
-            return;
-        }
-        // Cache freshness is anchored to when the server response arrived,
-        // not to when a potentially long download/patch/activation finished.
-        final long responseAtSeconds = System.currentTimeMillis() / 1000;
-
-        String decisionJson = NativeUpdateFlow.handleCheckResponse(
-            responseText, identity.toString(), config.optString("afterDownload", ""));
-        if (decisionJson == null) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_response");
-            return;
-        }
-        JSONObject decision = new JSONObject(decisionJson);
-        if (!"download".equals(decision.optString("action"))) {
-            boolean committed = context.commitNativeCheckResult(
-                resetGeneration, null, null, false,
-                buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
-            roundResult = committed
-                ? NativeUpdateResult.of(NativeUpdateResult.NO_UPDATE, decision.optString("reason"))
-                : NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "reset");
-            Log.i(UpdateContext.TAG,
-                "native check: nothing to do (" + decision.optString("reason") + ")");
-            return;
-        }
-        String hash = decision.optString("hash", "");
-        if (!UpdateFileUtils.isSafePathComponent(hash)) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_response");
-            return;
-        }
-
-        boolean downloaded = context.hasCompletedVersion(hash);
-        if (!downloaded) {
-            downloaded = performAttempts(
-                context, decision.optJSONArray("attempts"), hash, currentVersion,
-                deadlineNanos);
-        }
-        if (!downloaded) {
-            // The native attempt has finished, so JS may safely reuse the
-            // response and retry through its own strategy chain.
-            boolean committed = context.commitNativeCheckResult(
-                resetGeneration, null, null, false,
-                buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
-            roundResult = NativeUpdateResult.of(
-                committed ? NativeUpdateResult.FAILED : NativeUpdateResult.CANCELLED,
-                committed ? "download_failed" : "reset");
-            return;
-        }
-
-        // Version info (mirroring the JS side's setLocalHashInfo), the
-        // activation and the response cache all land in one atomic commit —
-        // see UpdateContext.commitNativeCheckResult.
-        String hashInfoJson = null;
-        JSONObject info = decision.optJSONObject("info");
-        if (info != null) {
-            JSONObject hashInfo = new JSONObject();
-            for (String key : new String[] {"name", "description", "metaInfo"}) {
-                Object value = info.opt(key);
-                if (value instanceof String) {
-                    hashInfo.put(key, value);
-                }
-            }
-            // A forceBoot activation is the brick-rescue path: mark it in the
-            // persisted info so JS can report force_boot_rescue when this
-            // version survives to markSuccess. Only the server-sent directive
-            // counts — a silent-strategy activation is ordinary delivery.
-            JSONObject infoConfig = info.optJSONObject("config");
-            if (infoConfig != null && infoConfig.optBoolean("forceBoot", false)) {
-                hashInfo.put("forceBootRescue", true);
-            }
-            if (crashRescueActive) {
-                hashInfo.put("crashRescue", true);
-            }
-            hashInfoJson = hashInfo.toString();
-        }
-        // Silent strategies or a server-marked forceBoot version (per-version
-        // remote override — the brick rescue) activate for the next launch;
-        // otherwise activation stays with the JS side. Unless a crash is
-        // being held: JS is dead, deferring to it would leave the fix on
-        // disk forever (§11.3).
-        boolean activate = decision.optBoolean("activate", false) || crashRescueActive;
-        boolean committed;
-        try {
-            committed = context.commitNativeCheckResult(
-                resetGeneration,
-                hash,
-                hashInfoJson,
-                activate,
-                buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
-        } catch (Exception e) {
-            Log.w(UpdateContext.TAG, "native check: commit failed: " + e);
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "commit_failed");
-            return;
-        }
-        if (!committed) {
-            Log.i(UpdateContext.TAG, "native check: reset during round, dropping result");
-        } else if (activate) {
-            unactivatedHash = null;
-            Log.i(UpdateContext.TAG,
-                "native check: downloaded " + hash + " and set for next launch");
-        } else {
-            // Remembered so a crash later in this process can still activate
-            // it (activatePendingVersion) — JS never will.
-            unactivatedGeneration = resetGeneration;
-            unactivatedHash = hash;
-            Log.i(UpdateContext.TAG,
-                "native check: downloaded " + hash + ", activation left to JS");
-        }
-        roundResult = committed
-            ? NativeUpdateResult.downloaded(hash, activate)
-            : NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "reset");
-    }
-
-    private static String buildResponseCacheJson(
-        String configJson,
-        String requestBody,
-        String responseText,
-        long responseAtSeconds
-    ) throws JSONException {
-        JSONObject cacheEntry = new JSONObject();
-        cacheEntry.put("ts", responseAtSeconds);
-        cacheEntry.put("body", responseText);
-        cacheEntry.put("request", requestBody);
-        cacheEntry.put("config", configJson);
-        return cacheEntry.toString();
-    }
-
     private static final OkHttpClient httpClient = new OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .callTimeout(15, TimeUnit.SECONDS)
         .build();
 
-    private static String httpRequest(String url, String postBody, long deadlineNanos) {
+    static String httpRequest(String url, String postBody, long timeoutMs, long callTimeoutMs,
+        DeviceRound host) {
         try {
             Request.Builder builder =
                 new Request.Builder().url(url).header("Accept", "application/json");
@@ -557,22 +341,14 @@ final class NativeCheckOrchestrator {
                 builder.post(RequestBody.create(
                     postBody, MediaType.parse("application/json; charset=utf-8")));
             }
-            OkHttpClient client = httpClient;
-            if (deadlineNanos > 0) {
-                // Crash-rescue budget: never let a single request outlive the
-                // handler's hold window.
-                long remainingMillis = TimeUnit.NANOSECONDS.toMillis(
-                    deadlineNanos - System.nanoTime());
-                if (remainingMillis <= 0) {
-                    return null;
-                }
-                if (remainingMillis < 15000) {
-                    client = httpClient.newBuilder()
-                        .callTimeout(remainingMillis, TimeUnit.MILLISECONDS)
-                        .build();
-                }
-            }
-            try (Response response = client.newCall(builder.build()).execute()) {
+            OkHttpClient client = httpClient.newBuilder()
+                .connectTimeout(Math.max(1, timeoutMs), TimeUnit.MILLISECONDS)
+                .readTimeout(Math.max(1, timeoutMs), TimeUnit.MILLISECONDS)
+                .callTimeout(Math.max(1, callTimeoutMs), TimeUnit.MILLISECONDS)
+                .build();
+            Call call = client.newCall(builder.build());
+            host.trackCall(call);
+            try (Response response = call.execute()) {
                 // Same rule as the artifact download: an https endpoint that
                 // redirects to plaintext http is a failed endpoint.
                 DownloadTask.rejectProtocolDowngrade(url, response);
@@ -588,6 +364,8 @@ final class NativeCheckOrchestrator {
             Log.w(UpdateContext.TAG, "native check: request failed with "
                 + e.getClass().getName() + ": " + e.getMessage());
             return null;
+        } finally {
+            host.trackCall(null);
         }
     }
 
@@ -613,205 +391,4 @@ final class NativeCheckOrchestrator {
         return source.readString(charset == null ? StandardCharsets.UTF_8 : charset);
     }
 
-    // Shared schema rule (update_flow_core::IsValidCheckResponse): a 200 with
-    // `{"error": ...}` is a failed endpoint, not a verdict, and must not stop
-    // the endpoint fallback.
-    private static boolean isValidCheckResponse(String responseText) {
-        return responseText != null && NativeUpdateFlow.isValidCheckResponse(responseText);
-    }
-
-    /**
-     * Sequential fallback over the ordered candidates (§5.1): one request at
-     * a time with its own timeout; after the configured round fails,
-     * queryUrls discovery merges remote candidates (excluding the
-     * already-tried) for one more round. No hedged race on purpose — this
-     * path is latency-insensitive.
-     */
-    private static String runCheckRequest(
-        JSONObject config, String appKey, String body, long deadlineNanos
-    ) {
-        JSONArray endpoints = config.optJSONArray("endpoints");
-        String orderedJson = NativeUpdateFlow.orderEndpointCandidates(
-            endpoints == null ? "[]" : endpoints.toString(), Math.random());
-        JSONArray ordered;
-        try {
-            ordered = orderedJson == null ? new JSONArray() : new JSONArray(orderedJson);
-        } catch (JSONException e) {
-            return null;
-        }
-        HashSet<String> tried = new HashSet<>();
-        int httpAttempts = 0;
-        for (int i = 0; i < ordered.length(); i++) {
-            String base = HttpUtils.normalizeEndpointBase(ordered.optString(i, ""));
-            if (base.isEmpty() || !tried.add(base)) {
-                continue;
-            }
-            if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
-                return null;
-            }
-            String response = httpRequest(
-                base + "/checkUpdate/" + appKey, body, deadlineNanos);
-            if (isValidCheckResponse(response)) {
-                return response;
-            }
-        }
-        JSONArray queryUrls = config.optJSONArray("queryUrls");
-        if (queryUrls == null) {
-            return null;
-        }
-        for (int i = 0; i < queryUrls.length(); i++) {
-            String listUrl = queryUrls.optString(i, "");
-            if (listUrl.isEmpty()) {
-                continue;
-            }
-            if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
-                return null;
-            }
-            String listText = httpRequest(listUrl, null, deadlineNanos);
-            if (listText == null) {
-                continue;
-            }
-            JSONArray remote;
-            try {
-                remote = new JSONArray(listText);
-            } catch (JSONException e) {
-                continue;
-            }
-            for (int j = 0; j < remote.length(); j++) {
-                String base = HttpUtils.normalizeEndpointBase(remote.optString(j, ""));
-                if (base.isEmpty() || tried.contains(base)) {
-                    continue;
-                }
-                if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
-                    return null;
-                }
-                tried.add(base);
-                String response = httpRequest(
-                    base + "/checkUpdate/" + appKey, body, deadlineNanos);
-                if (isValidCheckResponse(response)) {
-                    return response;
-                }
-            }
-            // One successfully fetched remote list is enough.
-            break;
-        }
-        return null;
-    }
-
-    private static long capToRescueBudget(long phaseDeadlineNanos, long rescueDeadlineNanos) {
-        if (rescueDeadlineNanos <= 0) {
-            return phaseDeadlineNanos;
-        }
-        return Math.min(phaseDeadlineNanos, rescueDeadlineNanos);
-    }
-
-    private static boolean performAttempts(
-        UpdateContext context, JSONArray attempts, String hash, String originHash,
-        long rescueDeadlineNanos
-    ) {
-        if (attempts == null) {
-            return false;
-        }
-        final long incrementalDeadlineNanos = capToRescueBudget(
-            System.nanoTime() + TimeUnit.SECONDS.toNanos(DOWNLOAD_PHASE_TIMEOUT_SECONDS),
-            rescueDeadlineNanos);
-        long fullDeadlineNanos = 0;
-        for (int i = 0; i < attempts.length(); i++) {
-            JSONObject attempt = attempts.optJSONObject(i);
-            if (attempt == null) {
-                continue;
-            }
-            String type = attempt.optString("type");
-            if ("diff".equals(type) && (originHash == null || originHash.isEmpty())) {
-                // diff patches from the running version; none is running.
-                continue;
-            }
-            final boolean isFullAttempt = !"diff".equals(type) && !"pdiff".equals(type);
-            if (isFullAttempt && fullDeadlineNanos == 0) {
-                // Incremental failures must not consume the last-resort full
-                // download's budget. Each phase gets one bounded 10min window.
-                fullDeadlineNanos = capToRescueBudget(
-                    System.nanoTime()
-                        + TimeUnit.SECONDS.toNanos(DOWNLOAD_PHASE_TIMEOUT_SECONDS),
-                    rescueDeadlineNanos);
-            }
-            final long deadlineNanos = isFullAttempt
-                ? fullDeadlineNanos : incrementalDeadlineNanos;
-            JSONArray urls = attempt.optJSONArray("urls");
-            if (urls == null) {
-                continue;
-            }
-            for (int j = 0; j < urls.length(); j++) {
-                String url = urls.optString(j, "");
-                if (url.isEmpty()) {
-                    continue;
-                }
-                // Check before enqueueing: once the phase budget is gone we
-                // must not launch an orphan download that outlives the round.
-                long remainingNanos = deadlineNanos - System.nanoTime();
-                if (remainingNanos <= 0) {
-                    if (isFullAttempt) {
-                        return false;
-                    }
-                    break;
-                }
-                final CountDownLatch latch = new CountDownLatch(1);
-                final AtomicBoolean succeeded = new AtomicBoolean(false);
-                final String attemptType = type;
-                UpdateContext.DownloadFileListener listener =
-                    new UpdateContext.DownloadFileListener() {
-                        @Override
-                        public void onDownloadCompleted(DownloadTaskParams params) {
-                            succeeded.set(true);
-                            latch.countDown();
-                        }
-
-                        @Override
-                        public void onDownloadFailed(Throwable error) {
-                            Log.i(UpdateContext.TAG, "native check: " + attemptType
-                                + " attempt failed: " + error);
-                            latch.countDown();
-                        }
-                    };
-                DownloadTaskParams task;
-                if ("diff".equals(type)) {
-                    task = context.downloadPatchFromPpk(
-                        url, hash, originHash, listener, deadlineNanos);
-                } else if ("pdiff".equals(type)) {
-                    task = context.downloadPatchFromApk(
-                        url, hash, listener, deadlineNanos);
-                } else {
-                    task = context.downloadFullUpdate(
-                        url, hash, listener, deadlineNanos);
-                }
-                try {
-                    if (!latch.await(remainingNanos, TimeUnit.NANOSECONDS)) {
-                        Log.w(UpdateContext.TAG,
-                            "native check: download phase timed out during " + type);
-                        // The task shares one download thread with the next
-                        // attempt: cancel its transfer (or keep it from
-                        // starting) instead of queueing behind it
-                        // (CODE_AUDIT 2.12).
-                        if (task != null) {
-                            task.cancel();
-                        }
-                        if (isFullAttempt) {
-                            return false;
-                        }
-                        break;
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    if (task != null) {
-                        task.cancel();
-                    }
-                    return false;
-                }
-                if (succeeded.get()) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
 }

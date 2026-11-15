@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖共享原生错误码约定与 JavaScript Error/cause 语义，不依赖 UI 或网络实现
+ * [INPUT]: 依赖 JavaScript Error/cause 语义；UpdateErrorCode 与已知码集合由 scripts/contract.json 的 jsErrors 派生，无运行时脚本依赖
  * [OUTPUT]: 对外提供 UpdateErrorCode、asUpdateErrorCode、UpdateError 与 toUpdateError 归一化入口
  * [POS]: src 的跨层错误语义边界，把平台异常转换为可稳定聚合、上报和分支处理的机器码
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -14,12 +14,10 @@
  * `code` property, which toUpdateError() preserves.
  */
 export type UpdateErrorCode =
-  // JS-layer codes
   | 'MODULE_NOT_LOADED'
   | 'APPKEY_REQUIRED'
   | 'NO_ENDPOINTS'
   | 'HTTP_STATUS'
-  // A 2xx check response that is not a check verdict (schema gate).
   | 'INVALID_RESPONSE'
   | 'CHECK_FAILED'
   | 'DOWNLOAD_FAILED'
@@ -27,13 +25,8 @@ export type UpdateErrorCode =
   | 'MARK_SUCCESS_FAILED'
   | 'APK_INSTALL_PENDING'
   | 'APK_DOWNLOAD_FAILED'
-  // A throw from a user-provided hook (e.g. beforeReload) — not an update
-  // pipeline failure, and excluded from server-side patch-health telemetry.
   | 'USER_HOOK_ERROR'
-  // A second client/provider in the same process — a hard integration error;
-  // the SDK is a process-level singleton.
   | 'SINGLETON_VIOLATION'
-  // Native codes (see cpp/patch_core/error_codes.h)
   | 'INVALID_OPTIONS'
   | 'PATCH_FAILED'
   | 'FILE_OPERATION_FAILED'

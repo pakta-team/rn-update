@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 librnupdate.so NAPI 默认导出与共享 C++ state/patch/update-flow 方法签名
+ * [INPUT]: 依赖 librnupdate.so NAPI 默认导出与共享 C++ state/patch/update-flow/resume 方法签名；状态操作码与归档类型编号由 scripts/contract.json 派生
  * [OUTPUT]: 对外提供状态操作码、含成功确认匹配结果的 DTO、归档/请求接口和 NativePatchCore 收窄后的原生能力
  * [POS]: Harmony 编译期/运行时原生防腐层，ArkTS 只通过此文件消费共享内核，不解析 NAPI 细节
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -103,22 +103,33 @@ interface NativePatchCoreBindings {
   /** 原生 patch 内核可消费的 diff 轨道版本(2 = hdiffv2 轨道) */
   getSupportedDiffVersion(): number;
 
-  // 更新流程决策层(cpp/update_flow_core,NATIVE_CHECKUPDATE_DESIGN §10):
-  // JSON 字符串进出,与决策层自身的边界一致。返回 undefined = 输入未通过
-  // 解析,编排器跳过本轮检测。
-  buildCheckRequestBody(inputJson: string): string | undefined;
-  orderEndpointCandidates(
-    endpointsJson: string,
-    randomSample: number,
-  ): string | undefined;
-  handleCheckResponse(
-    responseText: string,
-    identityJson: string,
-    afterDownload: string,
-  ): string | undefined;
-  // 响应 schema 门槛(update_flow_core::IsValidCheckResponse):200 但只带
-  // `{"error":...}` 的节点算失败,不得阻止继续 fallback。
-  isValidCheckResponse(responseText: string): boolean;
+  stepRound(state: string, event: string): string;
+  runnableConfig(config: string): string;
+  normalizeConfiguration(options: string): string;
+  hostCancellation(host: string, round: string, stored: string,
+    roundConfigGeneration: number, configGeneration: number,
+    roundResetGeneration: number, resetGeneration: number): string;
+  resumePlanRequest(sidecar: string, url: string, size: number): string;
+  resumeParseContentRange(range: string, start: number): number;
+  resumeClassifyResponse(status: number, offset: number, range: string,
+    encoding: string, length: number, sidecar: string, url: string, size: number): string;
+  resumeSidecar(url: string, etag: string, modified: string,
+    previous: string, total: number): string;
+  installBuildRecord(hash: string, bundle: string, artifact: string): string;
+  installParseRecord(text: string): { legacy: boolean; schema?: number;
+    versionHash?: string; bundleSha256?: string; artifactSha256?: string } | null;
+  installReadRecord(dir: string): { legacy: boolean; schema?: number;
+    versionHash?: string; bundleSha256?: string; artifactSha256?: string } | null;
+  installWriteRecord(dir: string, text: string): Promise<void>;
+  installSeal(staging: string, hash: string, artifact: string): Promise<void>;
+  installPromote(staging: string, version: string): void;
+  installIsComplete(version: string, hash: string): boolean;
+  installCheckActivation(version: string, hash: string, grandfathered: boolean): Promise<object>;
+  installActivationUnchanged(snapshot: object): void;
+  installIsReservedEntry(name: string): boolean;
+  installCheckUncompressedSize(archive: number, expanded: number): void;
+  installAuditExtractedDirectory(directory: string, archive: number): Promise<void>;
+  installParseManifest(text: string, normalizeResourceCopies: boolean): string;
 }
 
 export default NativeUpdateCore as unknown as NativePatchCoreBindings;

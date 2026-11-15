@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Metro 默认配置、文件缓存、e2etest 依赖树与仓库根 SDK 源码
- * [OUTPUT]: 对外提供强制解析当前工作树 SDK、锁定宿主 React 单例的 resolver，以及受控 watch/cache/worker 配置
+ * [OUTPUT]: 对外提供强制解析当前工作树 SDK、锁定宿主 React 单例的 resolver；只扫描 SDK 运行源码/身份与本宿主，排除其它样例和原生构建树
  * [POS]: e2etest Metro 构建边界，确保 bundle 消费当前工作树且不引入第二份 React Native
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -11,15 +11,14 @@ const { FileStore } = require('metro-cache');
 const sdkRoot = path.resolve(__dirname, '../..');
 const sdkSourceRoot = path.join(sdkRoot, 'src');
 const appNodeModules = path.join(__dirname, 'node_modules');
-const sdkNodeModules = path.join(sdkRoot, 'node_modules');
 const defaultConfig = getDefaultConfig(__dirname);
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const sdkNodeModulesBlockList = new RegExp(
-  `^${escapeRegExp(sdkNodeModules)}[\\\\/].*`
+const sdkNonRuntimeBlockList = new RegExp(
+  `^${escapeRegExp(sdkRoot)}[\\\\/](?!(?:src(?:[\\\\/]|$)|package\\.json$|Example(?:[\\\\/]e2etest(?:[\\\\/]|$)|$)))`
 );
 
 const defaultBlockList = defaultConfig.resolver.blockList;
@@ -27,7 +26,7 @@ const blockListPatterns = Array.isArray(defaultBlockList)
   ? defaultBlockList
   : [defaultBlockList];
 const combinedBlockList = new RegExp(
-  `(?:${[...blockListPatterns, sdkNodeModulesBlockList]
+  `(?:${[...blockListPatterns, sdkNonRuntimeBlockList]
     .map((pattern) => pattern.source)
     .join('|')})`
 );
@@ -98,9 +97,8 @@ resolveRequest.mapModuleName = mapModuleName;
  * @type {import('@react-native/metro-config').MetroConfig}
  */
 const config = {
-  // 观察 SDK 根以包含 package.json 身份文件；resolver.blockList 排除根
-  // node_modules，因此不会把第二棵依赖树纳入 Metro 文件地图或拖慢 Windows
-  // 首次 cache 构建。app 的 node_modules 仍是唯一 React/RN 实例来源。
+  // SDK 身份仍从根 package.json 读取；文件地图只接纳 src、该文件与本宿主，
+  // 避免父根观察顺带遍历其它 Example、Harmony/Gradle 缓存和 SDK 开发依赖。
   watchFolders: [sdkRoot],
   resolver: {
     blockList: combinedBlockList,

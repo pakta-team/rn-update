@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 React/RN 生命周期与 UI、URL polyfill、client/sharedState、context、core 原生状态、type 协议及 updateFlowCore 纯决策
- * [OUTPUT]: 对外提供 UpdateProvider 与兼容别名 PaktaProvider
- * [POS]: src 的 React 应用集成层，将客户端事件和更新策略投影为 Context 状态、进度、提示与用户动作，不实现底层补丁算法
+ * [OUTPUT]: 对外提供 UpdateProvider 与兼容别名 PaktaProvider；无参 switchVersion/switchVersionLater 优先切换已下载版本
+ * [POS]: src 的 React 应用集成层，将客户端事件和更新策略投影为 Context 状态、进度、提示与用户动作，检查结果由 client 解析后直接呈现，不实现底层补丁算法
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 // biome-ignore lint/correctness/noUnusedImports: preserve React import for compatibility with older React versions
@@ -17,7 +17,6 @@ import { Alert, AppState, Linking, Platform } from 'react-native';
 import { type Pakta, sharedState } from './client';
 import { ProgressContext, UpdateContext } from './context';
 import {
-  cInfo,
   currentVersion,
   currentVersionInfo,
   getCurrentVersionInfo,
@@ -25,7 +24,7 @@ import {
   rolledBackVersion,
 } from './core';
 import type { CheckResult, ProgressData, UpdateTestPayload } from './type';
-import { decideDownload, resolveCheckResult } from './updateFlowCore';
+import { decideDownload } from './updateFlowCore';
 import { assertWeb, isWeb, log, noop, parseQueryParams } from './utils';
 
 export const UpdateProvider = ({
@@ -107,19 +106,23 @@ export const UpdateProvider = ({
   );
 
   const switchVersion = useCallback(
-    async (info: CheckResult | undefined = updateInfoRef.current) => {
-      if (info?.hash) {
-        return client.switchVersion(info.hash);
-      }
+    async (info?: CheckResult) => {
+      const hash =
+        info !== undefined
+          ? info.hash
+          : client.getDownloadedHash() || updateInfoRef.current?.hash;
+      return hash ? client.switchVersion(hash) : undefined;
     },
     [client]
   );
 
   const switchVersionLater = useCallback(
-    async (info: CheckResult | undefined = updateInfoRef.current) => {
-      if (info?.hash) {
-        return client.switchVersionLater(info.hash);
-      }
+    async (info?: CheckResult) => {
+      const hash =
+        info !== undefined
+          ? info.hash
+          : client.getDownloadedHash() || updateInfoRef.current?.hash;
+      return hash ? client.switchVersionLater(hash) : undefined;
     },
     [client]
   );
@@ -221,9 +224,9 @@ export const UpdateProvider = ({
       // No throttle here: the client already dedupes checks via its 5s
       // response cache, and a second throttle layer silently returned
       // undefined, indistinguishable from a failed check.
-      let rootInfo: CheckResult | undefined;
+      let info: CheckResult | undefined;
       try {
-        rootInfo = await client.checkUpdate(extra);
+        info = await client.checkUpdate(extra);
       } catch (e: any) {
         // Client pipeline errors were already surfaced via the onError
         // subscription; errors thrown by user hooks (beforeCheckUpdate)
@@ -237,20 +240,11 @@ export const UpdateProvider = ({
         }
         return;
       }
-      if (!rootInfo) {
+      if (!info) {
         // Check was skipped or failed with no cached result; keep the last
         // known updateInfo instead of overwriting it with an empty object.
         return;
       }
-      let info = resolveCheckResult(
-        rootInfo,
-        {
-          packageVersion: client.getEffectivePackageVersion(),
-          currentVersion,
-          uuid: cInfo.uuid,
-        },
-        log
-      );
       if (
         info.update &&
         (typeof info.hash !== 'string' || info.hash.length === 0)

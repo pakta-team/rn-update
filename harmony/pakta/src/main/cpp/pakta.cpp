@@ -1,13 +1,12 @@
 /**
- * [INPUT]: 依赖 OpenHarmony NAPI、共享 patch_core/state_core/update_flow_core、摘要/HBC 变换与 Android JNI 补丁适配头
- * [OUTPUT]: 对外导出状态同步/操作及成功确认匹配结果、归档规划/复制、异步补丁/清理、SHA-256/CRC32、diffVersion 和 update-flow JSON 函数
+ * [INPUT]: 依赖 OpenHarmony NAPI、共享 patch_core/state_core/update_flow_core、resume_napi 适配、摘要/HBC 变换与 Android JNI 补丁适配头
+ * [OUTPUT]: 对外导出状态同步/操作及成功确认匹配结果、归档规划/复制、异步补丁/清理、SHA-256/CRC32、diffVersion、update-flow 和续传纯决策函数
  * [POS]: Harmony NAPI 原生核心，负责 JS 值校验、线程切换和 Promise 结算，算法语义全部委托共享 C++
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #include <napi/native_api.h>
 
 #include "flow_json.h"
-#include "update_flow_core.h"
 #include <js_native_api.h>
 #include <js_native_api_types.h>
 
@@ -1103,11 +1102,6 @@ static napi_value GetSupportedDiffVersion(napi_env env, napi_callback_info) {
   return result;
 }
 
-// ---- update-flow decision layer (NATIVE_CHECKUPDATE_DESIGN §10) ----
-// String-in/string-out JSON, matching the decision layer's own boundary.
-// Returning undefined (nullptr without a pending exception) means "input did
-// not parse"; the ArkTS orchestrator skips the check round.
-
 static napi_value MakeUtf8String(napi_env env, const std::string& value) {
   napi_value result = nullptr;
   if (napi_create_string_utf8(env, value.c_str(), value.size(), &result) !=
@@ -1118,109 +1112,32 @@ static napi_value MakeUtf8String(napi_env env, const std::string& value) {
   return result;
 }
 
-static napi_value FlowBuildCheckRequestBody(napi_env env,
-                                            napi_callback_info info) {
-  size_t argc = 1;
-  napi_value args[1] = {nullptr};
-  if (!GetArgCount(env, info, &argc, args) || argc < 1) {
-    ThrowError(env, "buildCheckRequestBody: missing input argument");
-    return nullptr;
-  }
-  bool ok = false;
-  std::string input_json = GetString(env, args[0], &ok);
-  if (!ok) {
-    return nullptr;
-  }
-  bool parsed = false;
-  flowjson::Value input = flowjson::Parse(input_json, &parsed);
-  if (!parsed || !input.IsObject()) {
-    return nullptr;
-  }
-  return MakeUtf8String(
-      env, flowjson::Stringify(updateflow::BuildCheckRequestBody(input)));
-}
-
-static napi_value FlowOrderEndpointCandidates(napi_env env,
-                                              napi_callback_info info) {
-  size_t argc = 2;
-  napi_value args[2] = {nullptr, nullptr};
-  if (!GetArgCount(env, info, &argc, args) || argc < 2) {
-    ThrowError(env, "orderEndpointCandidates: missing arguments");
-    return nullptr;
-  }
-  bool ok = false;
-  std::string endpoints_json = GetString(env, args[0], &ok);
-  if (!ok) {
-    return nullptr;
-  }
-  double sample = 0;
-  if (napi_get_value_double(env, args[1], &sample) != napi_ok) {
-    ThrowError(env, "orderEndpointCandidates: expected number sample");
-    return nullptr;
-  }
-  bool parsed = false;
-  flowjson::Value endpoints = flowjson::Parse(endpoints_json, &parsed);
-  if (!parsed || !endpoints.IsArray()) {
-    return nullptr;
-  }
-  return MakeUtf8String(env,
-                        flowjson::Stringify(updateflow::OrderEndpointCandidates(
-                            endpoints, sample)));
-}
-
-static napi_value FlowIsValidCheckResponse(napi_env env,
-                                           napi_callback_info info) {
-  size_t argc = 1;
-  napi_value args[1] = {nullptr};
-  if (!GetArgCount(env, info, &argc, args) || argc < 1) {
-    ThrowError(env, "isValidCheckResponse: missing arguments");
-    return nullptr;
-  }
-  bool ok = false;
-  std::string response_text = GetString(env, args[0], &ok);
-  if (!ok) {
-    // Exception pending (non-string argument): propagate it as a throw
-    // instead of a boolean that the caller would treat as a verdict.
-    return nullptr;
-  }
-  napi_value result = nullptr;
-  napi_get_boolean(env, updateflow::IsValidCheckResponse(response_text),
-                   &result);
-  return result;
-}
-
-static napi_value FlowHandleCheckResponse(napi_env env,
-                                          napi_callback_info info) {
-  size_t argc = 3;
-  napi_value args[3] = {nullptr, nullptr, nullptr};
-  if (!GetArgCount(env, info, &argc, args) || argc < 3) {
-    ThrowError(env, "handleCheckResponse: missing arguments");
-    return nullptr;
-  }
-  bool ok = false;
-  std::string response_text = GetString(env, args[0], &ok);
-  if (!ok) {
-    return nullptr;
-  }
-  std::string identity_json = GetString(env, args[1], &ok);
-  if (!ok) {
-    return nullptr;
-  }
-  std::string after_download = GetString(env, args[2], &ok);
-  if (!ok) {
-    return nullptr;
-  }
-  bool parsed = false;
-  flowjson::Value identity = flowjson::Parse(identity_json, &parsed);
-  if (!parsed || !identity.IsObject()) {
-    return nullptr;
-  }
-  return MakeUtf8String(env,
-                        flowjson::Stringify(updateflow::HandleCheckResponse(
-                            response_text, identity, false, after_download)));
-}
+#include "resume_napi.h"
+#include "install_napi.h"
+#include "round_napi.h"
 
 napi_value Init(napi_env env, napi_value exports) {
+  if (!ExportFunction(env, exports, "stepRound", harmony_round::Step) ||
+      !ExportFunction(env, exports, "runnableConfig", harmony_round::Config) ||
+      !ExportFunction(env, exports, "normalizeConfiguration", harmony_round::Normalize) ||
+      !ExportFunction(env, exports, "hostCancellation", harmony_round::Cancellation) ||
+      !ExportFunction(env, exports, "installIsReservedEntry", harmony_install::Reserved) ||
+      !ExportFunction(env, exports, "installCheckUncompressedSize", harmony_install::CheckSize) ||
+      !ExportFunction(env, exports, "installAuditExtractedDirectory", harmony_install::Audit) ||
+      !ExportFunction(env, exports, "installParseManifest", harmony_install::Manifest)) return nullptr;
+  if (!ExportFunction(env, exports, "installBuildRecord", harmony_install::Build) ||
+      !ExportFunction(env, exports, "installParseRecord", harmony_install::Parse) ||
+      !ExportFunction(env, exports, "installReadRecord", harmony_install::Read) ||
+      !ExportFunction(env, exports, "installWriteRecord", harmony_install::Write)) return nullptr;
+  if (!ExportFunction(env, exports, "installSeal", harmony_install::Seal) ||
+      !ExportFunction(env, exports, "installPromote", harmony_install::Promote) ||
+      !ExportFunction(env, exports, "installIsComplete", harmony_install::Complete) ||
+      !ExportFunction(env, exports, "installCheckActivation", harmony_install::Check) ||
+      !ExportFunction(env, exports, "installActivationUnchanged", harmony_install::Unchanged)) return nullptr;
+  if (!ExportFunction(env, exports, "resumeParseContentRange", ResumeParseContentRange) ||
+      !ExportFunction(env, exports, "resumePlanRequest", ResumePlanRequest) ||
+      !ExportFunction(env, exports, "resumeClassifyResponse", ResumeClassifyResponse) ||
+      !ExportFunction(env, exports, "resumeSidecar", ResumeSidecar)) return nullptr;
   if (!ExportFunction(env, exports, "syncStateWithBinaryVersion", SyncStateWithBinaryVersion) ||
       !ExportFunction(env, exports, "runStateCore", RunStateCore) ||
       !ExportFunction(env, exports, "buildArchivePatchPlan", BuildArchivePatchPlan) ||
@@ -1231,11 +1148,7 @@ napi_value Init(napi_env env, napi_value exports) {
       !ExportFunction(env, exports, "sha256HexFile", Sha256HexFile) ||
       !ExportFunction(env, exports, "sha256HexFileAsync", Sha256HexFileAsync) ||
       !ExportFunction(env, exports, "crc32", Crc32) ||
-      !ExportFunction(env, exports, "getSupportedDiffVersion", GetSupportedDiffVersion) ||
-      !ExportFunction(env, exports, "buildCheckRequestBody", FlowBuildCheckRequestBody) ||
-      !ExportFunction(env, exports, "orderEndpointCandidates", FlowOrderEndpointCandidates) ||
-      !ExportFunction(env, exports, "isValidCheckResponse", FlowIsValidCheckResponse) ||
-      !ExportFunction(env, exports, "handleCheckResponse", FlowHandleCheckResponse)) {
+      !ExportFunction(env, exports, "getSupportedDiffVersion", GetSupportedDiffVersion)) {
     return nullptr;
   }
   return exports;

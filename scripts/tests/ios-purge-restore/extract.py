@@ -6,8 +6,8 @@ from RCTPakta.mm on every run. Extraction fails on missing/ambiguous definitions
 strings/comments cannot affect brace matching. Only the test host supplies I/O.
 """
 
-# [INPUT]: 依赖标准库 argparse/json/pathlib/re 与 RCTPakta.mm 源码；正则分词 + 字面量掩码（保偏移保换行）驱动花括号匹配提取
-# [OUTPUT]: 对内提供 declaration/exported_method/method/function 提取器、mask_literals、mutate 负控改写与 generate()（生成 globals/helpers/pakta/orchestrator 四个 .inc，#line 回指源文件）与 --mutation CLI
+# [INPUT]: 依赖标准库 argparse/json/pathlib/re 与 RCTPakta.mm 展开的源码；提取状态、渠道身份与版本清理协作者，字面量掩码保留偏移和换行
+# [OUTPUT]: 提供提取器与 generate()，生成四个 ObjC 片段和现取共享 Status 工厂的 status.cpp，#line 回指源文件，支持 --mutation 负控
 # [POS]: ios-purge-restore 测试宿主的提取引擎，每次运行从 RCTPakta.mm 现取现译；缺定义/歧义/括号失衡即 fail-closed，不检查入生成物
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -74,20 +74,23 @@ def declaration(source: str, name: str) -> tuple[int, str]:
 
 
 GLOBALS = [
-    'keyPaktaInfo', 'paramPackageVersion', 'paramBuildTime',
+    'keyPaktaInfo', 'paramPackageVersion', 'paramBuildTime', 'keyBinaryChannel',
     'legacyParamPackageVersion', 'legacyParamBuildTime', 'paramLastVersion',
     'paramCurrentVersion', 'paramIsFirstTime', 'paramIsFirstLoadOk', 'keyUuid',
     'keyHashInfo', 'keyFirstLoadMarked', 'keyRolledBackMarked',
     'KeyPackageUpdatedMarked', 'keyNativeCheckCache', 'BUNDLE_FILE_NAME',
+    'VERSION_COMPLETE_FILE_NAME',
     'paktaStateLock', 'ignoreRollback', 'paktaIsUsingBundleUrl',
     'paktaResetGeneration', 'paktaLaunchVersion', 'paktaCrashRescueActive',
     'paktaPurgeRestoreActive', 'paktaPurgeRestoreWindowOpen',
-    'paktaHostRoundResult', 'kPaktaPurgeRestoreBudget',
+    'paktaHostRoundResult', 'kPaktaPurgeRestoreBudget', 'kPaktaPurgeRestoreMinimumBudget',
 ]
 HELPERS = [
     'PaktaWithStateLock', 'PaktaToStdString', 'PaktaFromStdString',
-    'PaktaSetNullableString', 'PaktaHashInfoKey', 'PaktaBinaryIdentityValue',
+    'PaktaSetNullableString', 'PaktaHashInfoKey', 'PaktaClearVersionScopedState', 'PaktaBinaryIdentityValue',
     'PaktaStateFromDefaults', 'PaktaApplyStateToDefaults', 'PaktaSwitchVersionLocked',
+    'PaktaReadInstallRecord', 'PaktaHasCompletedVersionAtPath',
+    'PaktaVerifyInstallForActivation',
 ]
 MUTATIONS = ('late-activation', 'skip-reresolve', 'ignore-reset')
 
@@ -108,8 +111,15 @@ def mutate(text: str, mutation: str) -> str:
     return mutated
 
 
-def generate(source_path: Path, output: Path, mutation: str | None = None) -> None:
+def production_source(source_path: Path) -> str:
     source = source_path.read_text(encoding='utf-8')
+    return re.sub(r'^#include "(RCTPakta[^"/]+\.inc)"\n',
+                  lambda match: production_source(source_path.parent / match[1]),
+                  source, flags=re.MULTILINE)
+
+
+def generate(source_path: Path, output: Path, mutation: str | None = None) -> None:
+    source = production_source(source_path)
     restore = method(source, 'restorePurgedLaunch')
     commit = method(source, 'commitRoundWithGeneration')
     if mutation == 'skip-reresolve':
@@ -129,6 +139,14 @@ def generate(source_path: Path, output: Path, mutation: str | None = None) -> No
         output.joinpath(name).write_text(''.join(
             f'#line {line} {filename}\n{text}\n\n' for line, text in snippets
         ), encoding='utf-8')
+    status_path = source_path.resolve().parents[2] / 'cpp/patch_core/patch_core.cpp'
+    status_source = status_path.read_text(encoding='utf-8')
+    factories = [definition(status_source, rf'^Status Status::{name}\s*\(', f'Status::{name}')
+                 for name in ('Ok', 'Error')]
+    output.joinpath('status.cpp').write_text(
+        '#include "cpp/patch_core/patch_core.h"\nnamespace pakta { namespace patch {\n'
+        + ''.join(f'#line {line} {json.dumps(str(status_path))}\n{text}\n' for line, text in factories)
+        + '} }\n', encoding='utf-8')
 
 
 def main() -> None:

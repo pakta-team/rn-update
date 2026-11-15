@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 patch_core.h 的 PatchManifest、FileSourcePatchOptions 与 Status，依赖归档条目名称集合
+ * [INPUT]: 依赖 patch_core.h 的 PatchManifest、FileSourcePatchOptions 与 Status、归档条目名称集合；补丁类型编号由 scripts/contract.json 的 archivePatchTypes 派生
  * [OUTPUT]: 对外提供归档补丁类型、条目分类、ArchivePatchPlan、CopyGroup 及计划构建函数
  * [POS]: patch_core 的无 IO 规划边界，把 full/pdiff/diff 归档语义翻译为文件补丁执行参数
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

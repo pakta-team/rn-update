@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * [INPUT]: 依赖环境变量 RELEASE_VERSION、rn-update/package.json、rn-update-cli/package.json 与 Harmony HAR 发布元数据
- * [OUTPUT]: 校验发布 tag、SDK、CLI、oh-package.json5 与 BuildProfile.ets 版本同构，否则失败退出
- * [POS]: scripts 的发版一致性守门脚本，防止 tag 指错提交或版本号遗漏
+ * [INPUT]: 依赖环境变量 RELEASE_VERSION、本仓库 package.json 与 Harmony HAR 发布元数据
+ * [OUTPUT]: 校验发布 tag、SDK、oh-package.json5 与 BuildProfile.ets 版本同构，否则失败退出
+ * [POS]: 独立 SDK 仓库的发版一致性守门脚本，不依赖兄弟 CLI 检出
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 // The release tag (vX.Y.Z) must be the package.json version being published:
@@ -28,20 +28,6 @@ if (tag !== expected && tag !== pkg.version) {
 // assembleHar, and this check keeps the committed value from drifting.
 const fs = require('node:fs');
 const path = require('node:path');
-const cliPackagePath = path.join(
-  __dirname,
-  '..',
-  '..',
-  'rn-update-cli',
-  'package.json'
-);
-const cliPackage = JSON.parse(fs.readFileSync(cliPackagePath, 'utf8'));
-if (cliPackage.version !== pkg.version) {
-  console.error(
-    `check-release-version: rn-update-cli/package.json version ${cliPackage.version} does not match package.json version ${pkg.version}`
-  );
-  process.exit(1);
-}
 const ohPackagePath = path.join(
   __dirname,
   '..',
@@ -81,6 +67,6 @@ if (buildProfileVersion !== pkg.version) {
 console.log(
   'check-release-version: ' +
     tag +
-    ' matches package.json, rn-update-cli/package.json, oh-package.json5 and BuildProfile.ets ' +
+    ' matches package.json, oh-package.json5 and BuildProfile.ets ' +
     pkg.version
 );

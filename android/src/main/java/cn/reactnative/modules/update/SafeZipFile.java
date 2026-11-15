@@ -21,7 +21,10 @@ public class SafeZipFile extends ZipFile {
 
     public SafeZipFile(File file) throws IOException {
         super(file);
+        archiveBytes = file.length();
     }
+
+    private final long archiveBytes;
 
     private static final int BUFFER_SIZE = 8192;
 
@@ -42,33 +45,22 @@ public class SafeZipFile extends ZipFile {
      */
     Inspection inspect() throws IOException {
         Inspection result = new Inspection();
+        if (size() > ArchiveLimits.MAX_ENTRIES) {
+            throw new IOException("archive has too many entries");
+        }
+        String[] names = new String[size()];
+        long[] sizes = new long[size()];
+        long[] compressed = new long[size()];
         Enumeration<? extends ZipEntry> entries = entries();
         while (entries.hasMoreElements()) {
             ZipEntry entry = entries.nextElement();
+            int index = (int) result.entries;
+            names[index] = entry.getName();
+            sizes[index] = entry.getSize();
+            compressed[index] = entry.getCompressedSize();
             result.entries++;
-            if (result.entries > ArchiveLimits.MAX_ENTRIES) {
-                throw new IOException(
-                    "archive has too many entries (> " + ArchiveLimits.MAX_ENTRIES + ")");
-            }
-            long size = entry.getSize();
-            long compressed = entry.getCompressedSize();
-            if (size > ArchiveLimits.MAX_ENTRY_BYTES) {
-                throw new IOException(
-                    "archive entry too large: " + entry.getName() + " (" + size + " bytes)");
-            }
-            if (size > 0) {
-                result.totalUncompressed += size;
-                if (result.totalUncompressed > ArchiveLimits.MAX_TOTAL_UNCOMPRESSED_BYTES) {
-                    throw new IOException("archive expands beyond "
-                        + ArchiveLimits.MAX_TOTAL_UNCOMPRESSED_BYTES + " bytes");
-                }
-                if (compressed > 0 && size > ArchiveLimits.RATIO_CHECK_MIN_BYTES
-                    && size / compressed > ArchiveLimits.MAX_COMPRESSION_RATIO) {
-                    throw new IOException(
-                        "archive entry compression ratio too high: " + entry.getName());
-                }
-            }
         }
+        result.totalUncompressed = NativeInstall.inspect(names, sizes, compressed, archiveBytes);
         return result;
     }
 
@@ -80,16 +72,12 @@ public class SafeZipFile extends ZipFile {
     static final String RESERVED_ENTRY_PREFIX = ".pakta-";
 
     static boolean isReservedEntryName(String name) {
-        if (name == null) {
-            return false;
+        if (name == null) return false;
+        try {
+            return "true".equals(NativeInstall.execute("reserved", name, null, null, null));
+        } catch (IOException e) {
+            throw new SecurityException("Cannot validate archive entry", e);
         }
-        String normalized = name.replace('\\', '/');
-        while (normalized.endsWith("/")) {
-            normalized = normalized.substring(0, normalized.length() - 1);
-        }
-        int slash = normalized.lastIndexOf('/');
-        String baseName = slash >= 0 ? normalized.substring(slash + 1) : normalized;
-        return baseName.startsWith(RESERVED_ENTRY_PREFIX);
     }
 
     @Override

@@ -142,13 +142,7 @@ public class UpdateModuleImpl {
     // running version in place) as FILE_OPERATION_FAILED. DownloadTask
     // classifies them.
     private static String downloadErrorCode(Throwable error) {
-        if (error instanceof PatchFailedException) {
-            return ErrorCodes.PATCH_FAILED;
-        }
-        if (error instanceof FileOperationException) {
-            return ErrorCodes.FILE_OPERATION_FAILED;
-        }
-        return ErrorCodes.DOWNLOAD_FAILED;
+        return ErrorCodes.forDownloadFailure(error);
     }
 
     public void downloadFullUpdate(final ReadableMap options, final Promise promise) {

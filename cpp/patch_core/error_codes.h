@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 JS UpdateErrorCode 与 Android Java 常量共同遵守的跨平台错误语义
+ * [INPUT]: 常量声明由 scripts/contract.json 的 nativeErrors 经 generate-contract.js 派生，无运行时依赖
  * [OUTPUT]: 对外提供稳定、机器可读的原生更新错误码常量
- * [POS]: patch_core 的错误协议事实源，供 iOS 直接引用并约束无法包含本头的镜像实现
+ * [POS]: patch_core 的原生错误码消费头，供 iOS 直接引用；Java/ArkTS/JS 对应声明由同一本地 contract 派生
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #ifndef PAKTA_PATCH_CORE_ERROR_CODES_H_
@@ -47,8 +47,7 @@ constexpr const char* kInvalidHashInfo = "INVALID_HASH_INFO";
 constexpr const char* kUnsupportedPlatform = "UNSUPPORTED_PLATFORM";
 // Android full-package installation requires the user to trust the app as an
 // install source before PackageInstaller can accept a session.
-constexpr const char* kApkInstallPermissionRequired =
-    "APK_INSTALL_PERMISSION_REQUIRED";
+constexpr const char* kApkInstallPermissionRequired = "APK_INSTALL_PERMISSION_REQUIRED";
 // PackageInstaller could not create, write, commit, or continue an APK session.
 constexpr const char* kApkInstallFailed = "APK_INSTALL_FAILED";
 

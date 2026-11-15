@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 NativeUpdateCore 与 cpp/update_flow_core 的字符串 JSON JNI 实现
- * [OUTPUT]: 对内提供检查请求构造、端点排序和响应决策三个无 IO 原生入口
- * [POS]: NativeCheckOrchestrator 与跨平台纯决策核心之间的窄桥，不解释或持久化 JSON
+ * [INPUT]: 依赖 NativeUpdateCore 与 android/jni/native_round_jni 的共享配置及轮次绑定
+ * [OUTPUT]: 对内提供 StepRound、配置归一化/门禁/等价与宿主取消入口
+ * [POS]: Android 配置适配和轮次执行器到共享纯核的窄桥，不解释或持久化 JSON
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 package cn.reactnative.modules.update;
@@ -20,12 +20,14 @@ final class NativeUpdateFlow {
     private NativeUpdateFlow() {
     }
 
-    static native String buildCheckRequestBody(String inputJson);
+    static native String stepRound(String stateJson, String eventJson);
 
-    static native String orderEndpointCandidates(String endpointsJson, double randomSample);
+    static native String runnableConfig(String configJson);
 
-    static native boolean isValidCheckResponse(String responseText);
+    static native String normalizeConfiguration(String optionsJson);
 
-    static native String handleCheckResponse(
-        String responseText, String identityJson, String afterDownload);
+    static native boolean configsEquivalent(String first, String second);
+
+    static native String hostCancellation(String hostConfig, String roundConfig, String storedConfig,
+        long roundConfigGeneration, long configGeneration, long roundResetGeneration, long resetGeneration);
 }

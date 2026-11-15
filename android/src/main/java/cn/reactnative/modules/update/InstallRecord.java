@@ -1,18 +1,13 @@
 /**
- * [INPUT]: 依赖 org.json、java.io/nio 与 Android API 分级能力；手动镜像 cpp/patch_core/install_record.h
+ * [INPUT]: 依赖 org.json、java.io/nio 与 Android API 分级能力；schema/记录名/staging 后缀由 scripts/contract.json 的 installRecord 派生，IO 与摘要校验不参与生成
  * [OUTPUT]: 提供 .pakta-complete 完成记录的构建/写入(fsync+目录 sync)/解析/校验与 staging 目录工具
  * [POS]: Android 的安装完整性层，原子 rename 前落记录、激活前重验 bundle 摘要
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 package cn.reactnative.modules.update;
 
-import android.os.Build;
-import android.util.Log;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -33,18 +28,13 @@ final class InstallRecord {
         return new File(versionDir.getPath() + STAGING_SUFFIX);
     }
 
+    /**
+     * bundleSha256 is mandatory for schema 1: a version whose bundle could
+     * not be hashed must fail its install, never be recorded unverifiable.
+     */
     static String build(String versionHash, String bundleSha256, String artifactSha256)
-        throws JSONException {
-        JSONObject record = new JSONObject();
-        record.put("schema", SCHEMA);
-        record.put("versionHash", versionHash);
-        if (bundleSha256 != null && !bundleSha256.isEmpty()) {
-            record.put("bundleSha256", bundleSha256);
-        }
-        if (artifactSha256 != null && !artifactSha256.isEmpty()) {
-            record.put("artifactSha256", artifactSha256);
-        }
-        return record.toString();
+        throws IOException, JSONException {
+        return NativeInstall.execute("build", versionHash, bundleSha256, artifactSha256, null);
     }
 
     /**
@@ -53,32 +43,7 @@ final class InstallRecord {
      * directory entry is only durable once the directory itself is synced.
      */
     static void write(File versionDir, String recordJson) throws IOException {
-        File file = new File(versionDir, FILE_NAME);
-        try (FileOutputStream out = new FileOutputStream(file)) {
-            out.write(recordJson.getBytes(StandardCharsets.UTF_8));
-            out.flush();
-            out.getFD().sync();
-        }
-        syncDirectory(versionDir);
-    }
-
-    // java.nio.file (the only way to open a directory for fsync from Java)
-    // is API 26+ on Android; below that the file fsync above is all there
-    // is. Best-effort by design: a file system that refuses to open a
-    // directory for reading must not fail the install. Also called by the
-    // installer on the versions root after the staging -> version rename:
-    // that rename changes the parent's entries, which only the parent's own
-    // sync makes durable.
-    static void syncDirectory(File dir) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return;
-        }
-        try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(
-                dir.toPath(), java.nio.file.StandardOpenOption.READ)) {
-            channel.force(true);
-        } catch (Throwable e) {
-            Log.w("pakta", "Directory fsync skipped for " + dir + ": " + e);
-        }
+        NativeInstall.execute("write", versionDir.getAbsolutePath(), recordJson, null, null);
     }
 
     /**
@@ -86,27 +51,9 @@ final class InstallRecord {
      * file (legacy marker) yields an empty JSONObject.
      */
     static JSONObject read(File versionDir) {
-        File file = new File(versionDir, FILE_NAME);
-        if (!file.isFile()) {
-            return null;
-        }
-        if (file.length() == 0) {
-            return new JSONObject();
-        }
-        if (file.length() > 64 * 1024) {
-            return null;
-        }
-        try (FileInputStream in = new FileInputStream(file)) {
-            byte[] bytes = new byte[(int) file.length()];
-            int offset = 0;
-            while (offset < bytes.length) {
-                int read = in.read(bytes, offset, bytes.length - offset);
-                if (read < 0) {
-                    break;
-                }
-                offset += read;
-            }
-            return new JSONObject(new String(bytes, 0, offset, StandardCharsets.UTF_8));
+        try {
+            String text = NativeInstall.execute("read", versionDir.getAbsolutePath(), null, null, null);
+            return text == null ? null : new JSONObject(text);
         } catch (IOException | JSONException e) {
             return null;
         }
@@ -117,41 +64,63 @@ final class InstallRecord {
      * version. No digest work — this runs on launch / dedup paths.
      */
     static boolean isComplete(File versionDir, String versionHash) {
-        JSONObject record = read(versionDir);
-        if (record == null) {
+        try {
+            return "true".equals(NativeInstall.execute("complete", versionDir.getAbsolutePath(),
+                versionHash, null, null));
+        } catch (IOException e) {
             return false;
         }
-        if (record.length() == 0) {
-            return true;
-        }
-        return record.optInt("schema", 0) == SCHEMA
-            && versionHash.equals(record.optString("versionHash", ""));
     }
 
     /**
-     * Activation check: re-hashes the bundle when the record carries a digest.
+     * Activation check: re-hashes the bundle against the record's digest,
+     * which schema 1 makes mandatory (only the legacy empty marker has none).
      * Throws with the reason when the directory must not be activated.
      */
     static void verifyForActivation(File versionDir, String versionHash, File bundleFile)
         throws IOException {
-        JSONObject record = read(versionDir);
-        if (record == null) {
-            throw new IOException("Bundle version " + versionHash + " has no valid completion record.");
+        try (Activation snapshot = checkActivation(versionDir, versionHash, bundleFile, false)) {
+            snapshot.assertUnchanged(false);
         }
-        if (record.length() == 0) {
-            return;
+    }
+
+    static Activation checkActivation(File directory, String hash, File bundle, boolean grandfathered)
+        throws IOException {
+        if (!bundle.getCanonicalFile().getParentFile().equals(directory.getCanonicalFile())) {
+            throw new IOException("Bundle is outside version directory");
         }
-        if (record.optInt("schema", 0) != SCHEMA
-            || !versionHash.equals(record.optString("versionHash", ""))) {
-            throw new IOException("Bundle version " + versionHash + " completion record mismatch.");
+        return new Activation(NativeInstall.checkActivation(directory.getAbsolutePath(), hash,
+            bundle.getName(), grandfathered));
+    }
+
+    static void seal(File staging, String hash, String artifact) throws IOException {
+        NativeInstall.execute("seal", staging.getAbsolutePath(), hash, artifact, null);
+    }
+
+    static void promote(File staging, File directory) throws IOException {
+        NativeInstall.execute("promote", staging.getAbsolutePath(), directory.getAbsolutePath(), null, null);
+    }
+
+    static final class Activation implements AutoCloseable {
+        private long handle;
+
+        private Activation(long handle) throws IOException {
+            if (handle == 0) throw new IOException("Missing activation snapshot");
+            this.handle = handle;
         }
-        String expected = record.optString("bundleSha256", "");
-        if (expected.isEmpty()) {
-            return;
+
+        synchronized void assertUnchanged(boolean grandfathered) throws IOException {
+            if (handle == 0 || !NativeInstall.unchanged(handle, grandfathered)) {
+                throw new IOException("Install changed before activation commit");
+            }
         }
-        String actual = UpdateFileUtils.sha256Hex(bundleFile);
-        if (!expected.equalsIgnoreCase(actual)) {
-            throw new IOException("Bundle version " + versionHash + " bundle digest mismatch.");
+
+        @Override
+        public synchronized void close() {
+            if (handle != 0) {
+                NativeInstall.release(handle);
+                handle = 0;
+            }
         }
     }
 }
